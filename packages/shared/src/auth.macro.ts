@@ -1,6 +1,6 @@
 import { jwt } from '@elysiajs/jwt'
 import { Elysia } from 'elysia'
-import { UnauthorizedError } from './error.lib'
+import { UnauthorizedError } from './error/error.lib'
 
 /**
  * Request-зависимый сервис по best practice Elysia: macro `auth`.

@@ -1,5 +1,5 @@
 import { AppError } from './error.lib'
-import type { responseMapper } from './response'
+import type { responseMapper } from '../response'
 
 type Mapper = ReturnType<typeof responseMapper>
 
