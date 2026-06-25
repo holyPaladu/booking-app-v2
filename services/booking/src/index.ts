@@ -2,17 +2,17 @@ import { createDatabase, mapError, responseMapper } from '@booking/shared'
 import { Elysia } from 'elysia'
 import { cfg } from './config'
 import { runMigrations } from './migrations'
-import { authRepo } from './modules/auth/repo'
-import { authService } from './modules/auth/service'
-import { authRouteV1 } from './modules/auth/v1.route'
+import { bookingRepo } from './modules/bookings/repo'
+import { bookingService } from './modules/bookings/service'
+import { bookingRouteV1 } from './modules/bookings/v1.route'
 
 async function bootstrap() {
   const response = responseMapper()
   const sql = createDatabase(cfg.get('db_url'))
   await runMigrations(sql)
 
-  const repo = authRepo(sql)
-  const svc = authService(repo)
+  const repo = bookingRepo(sql)
+  const svc = bookingService(repo)
 
   const app = new Elysia()
     .onError(({ code, error, set }) => {
@@ -21,10 +21,12 @@ async function bootstrap() {
       return body
     })
     .get('/health', () => response.success<{ status: 'ok' }>('Service live!', { status: 'ok' }))
-    .group('/api', (api) => api.group('/v1', (v1) => v1.use(authRouteV1(svc, { response, cfg }))))
+    .group('/api', (api) =>
+      api.group('/v1', (v1) => v1.use(bookingRouteV1(svc, { response, cfg }))),
+    )
     .listen(cfg.getNumber('port'))
 
-  console.log(`🦊 Elysia is running at ${app.server?.hostname}:${app.server?.port}`)
+  console.log(`🦊 booking is running at ${app.server?.hostname}:${app.server?.port}`)
 }
 
 bootstrap().catch((err) => console.error(err))

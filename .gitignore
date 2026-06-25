@@ -1,0 +1,15 @@
+.idea
+.claude
+
+# deps & build
+node_modules
+dist
+*.tsbuildinfo
+
+# env & secrets
+.env
+.env.*
+!.env.example
+
+# logs
+*.log

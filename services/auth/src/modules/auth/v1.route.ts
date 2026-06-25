@@ -1,20 +1,22 @@
+import type { createConfigService, responseMapper } from '@booking/shared'
+import { jwt } from '@elysiajs/jwt'
 import { Elysia } from 'elysia'
-import { UserCreated } from './types/entity'
 import { AuthModels } from './models'
-import { AuthService } from './service'
-import { responseMapper } from '../../shared/mapper/response.mapper'
+import type { authService } from './service'
 
-export const AuthRouteV1 = (svc: ReturnType<typeof AuthService>, response: ReturnType<typeof responseMapper>) => {
-  return new Elysia({ prefix: "auth", tags: ['auth'] })
+type routeDepends = {
+  response: ReturnType<typeof responseMapper>
+  cfg: ReturnType<typeof createConfigService>
+}
+
+export const authRouteV1 = (svc: ReturnType<typeof authService>, deps: routeDepends) => {
+  return new Elysia({ prefix: 'auth', tags: ['auth'] })
+    .use(
+      jwt({
+        name: 'jwt',
+        secret: deps.cfg.get('jwt_secret'),
+        exp: deps.cfg.get('jwt_expiry'),
+      }),
+    )
     .model(AuthModels)
-
-    .post("/register", async ({ body }) => {
-      const data = await svc.register(body)
-      return response.success<UserCreated>(data.message, data.user)
-    }, { body: 'auth.register' })
-
-    .post("/login", async ({ body }) => {
-      const data = await svc.login(body)
-      return response.success<{ token: string }>(`Verify your email -> ${body.email}`, data)
-    }, { body: "auth.login" })
 }

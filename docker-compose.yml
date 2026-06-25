@@ -1,0 +1,56 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  auth:
+    image: oven/bun:1
+    working_dir: /app
+    command: sh -c "bun install && bun run --filter auth-service dev"
+    environment:
+      DB_URL: postgres://postgres:postgres@postgres:5432/auth
+      JWT_SECRET: dev-secret-change-me
+      JWT_EXPIRY: 15m
+      PORT: "3000"
+      NODE_ENV: development
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  booking:
+    image: oven/bun:1
+    working_dir: /app
+    # JWT_SECRET совпадает с auth — booking только проверяет токены.
+    command: sh -c "bun install && bun run --filter booking-service dev"
+    environment:
+      DB_URL: postgres://postgres:postgres@postgres:5432/booking
+      JWT_SECRET: dev-secret-change-me
+      PORT: "3001"
+      NODE_ENV: development
+    ports:
+      - "3001:3001"
+    volumes:
+      - ./:/app
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  pgdata:

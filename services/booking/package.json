@@ -1,6 +1,6 @@
 {
-  "name": "auth-service",
-  "version": "1.0.50",
+  "name": "booking-service",
+  "version": "0.1.0",
   "module": "src/index.ts",
   "type": "module",
   "scripts": {
