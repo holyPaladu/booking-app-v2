@@ -1,6 +1,6 @@
 import { t } from 'elysia'
 
-export const AuthModels = {
+export const authModels = {
   'auth.register': t.Object({
     email: t.String({ format: 'email' }),
     password: t.String({ minLength: 6 }),
@@ -12,5 +12,5 @@ export const AuthModels = {
 }
 
 // Single source of truth: типы выводим из моделей, а не дублируем интерфейсами.
-export type AuthRegisterRequest = (typeof AuthModels)['auth.register']['static']
-export type AuthLoginRequest = (typeof AuthModels)['auth.login']['static']
+export type AuthRegisterRequest = (typeof authModels)['auth.register']['static']
+export type AuthLoginRequest = (typeof authModels)['auth.login']['static']

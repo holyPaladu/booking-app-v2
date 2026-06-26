@@ -1,28 +1,32 @@
 import { describe, expect, it } from 'bun:test'
 import { createConfigService, mapError, responseMapper } from '@booking/shared'
 import { Elysia } from 'elysia'
-import { authService } from '../src/modules/auth/service'
-import type { IAuthRepo } from '../src/modules/auth/ports/repo.port'
-import { authRouteV1 } from '../src/modules/auth/v1.route'
+import { authRouteV1 } from '../src/modules/routes/v1/auth.route'
+import { authService } from '../src/modules/services/auth.service'
+import type { IUserService } from '../src/modules/ports/user.port'
 
-// E2E через app.handle() с in-memory repo — без Postgres.
+// E2E через app.handle() с in-memory user-модулем — без Postgres.
+// auth не знает про БД: ему передаётся фейковый IUserService (та же подмена, что и в проде).
 function buildApp() {
-  const users: { id: string; email: string; password_hash: string; email_verified: boolean }[] = []
-  const repo: IAuthRepo = {
-    find: async (email) => users.find((u) => u.email === email),
-    create: async (email, hash) => {
-      const u = { id: crypto.randomUUID(), email, password_hash: hash, email_verified: false }
-      users.push(u)
-      return { id: u.id, email: u.email }
+  const rows: { id: string; email: string; password_hash: string; status: 'active' }[] = []
+  const users: IUserService = {
+    create: async ({ email, password_hash }) => {
+      const u = { id: crypto.randomUUID(), email, password_hash, status: 'active' as const }
+      rows.push(u)
+      return { id: u.id, email: u.email, status: u.status }
     },
-    put: async (dto) => ({ id: dto.id, email: dto.email }),
+    findByEmail: async (email) => rows.find((u) => u.email === email),
+    getById: async (id) => {
+      const u = rows.find((r) => r.id === id)
+      return u && { id: u.id, email: u.email, status: u.status }
+    },
   }
   const cfg = createConfigService({
     jwt_secret: { key: 'JWT_SECRET', default: 'test-secret' },
     jwt_expiry: { key: 'JWT_EXPIRY', default: '15m' },
   })
   const response = responseMapper()
-  const svc = authService(repo)
+  const svc = authService(users)
   return new Elysia()
     .onError(({ code, error, set }) => {
       const { status, body } = mapError(code, error, response)

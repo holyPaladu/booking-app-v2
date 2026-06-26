@@ -8,10 +8,10 @@ export const responseMapper = () => {
       message,
     }),
 
-    success: <T>(message: string, data: T): SuccessResponse<T> => ({
+    success: <T>(message: string, data?: T): SuccessResponse<T> => ({
       success: true,
       message,
-      data,
+      ...(data !== undefined && { data }),
     }),
   }
 }

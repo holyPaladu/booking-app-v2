@@ -23,11 +23,12 @@ bun run --filter booking-service dev
 - `src/index.ts` — bootstrap: config → db → migrations → repo → service → routes; глобальный `onError` через `mapError`.
 - `src/config.ts` — схема env (`ConfigService` из shared).
 - `src/migrations/index.ts` — `MIGRATIONS[]` + `applyMigrations` из shared; трекинг в `schema_migrations`, гоняются на старте.
-- `src/modules/<name>/` — `v1.route.ts` (HTTP), `service.ts` (бизнес-логика), `repo.ts` (SQL), `models/` (валидация + типы), `types/` (entity, ports).
+- `src/modules/<name>/` — плоский канон `<name>.{model,entity,port,repo,service,route}.ts`: route (HTTP) → service (логика) → repo (SQL); `port.ts` держит `IXRepo` + `IXService`. Образец — `services/auth/src/modules/{user,auth}`. (booking ещё на старой раскладке `v1.route.ts`/`types/`/`models/`.)
+- **Модуль использует модуль** только через `IXService` (порт), переданный в фабрику; связывается в `index.ts` (composition root). Пример: `auth.service(users: IUserService)`. См. [docs/adr/0005-module-composition-ports.md](docs/adr/0005-module-composition-ports.md).
 
 ## Конвенции (кратко; подробно — [docs/conventions.md](docs/conventions.md))
 - Слои: **route → service → repo → db**. Бизнес-логика — в service, SQL — только в repo.
-- DI через фабрики-замыкания и порты (`types/ports/*.port.ts`); чистые service/repo не зависят от Elysia.
+- DI через фабрики-замыкания и порты (`<name>.port.ts`); чистые service/repo не зависят от Elysia. Межмодульные связи — через `IXService` в composition root.
 - Идиомы Elysia: «1 инстанс = 1 контроллер», method chaining, `.model` для валидации, **типы из моделей** (`Model.static`) — не дублировать интерфейсами.
 - Ошибки — классы `AppError` из shared; в `onError` маппятся через `mapError` (включая валидацию Elysia → 422).
 - Ответы — только `responseMapper` (`success`/`error`). Конфиг — только `cfg.get(...)`. SQL — теговые шаблоны `postgres`, параметризованно.

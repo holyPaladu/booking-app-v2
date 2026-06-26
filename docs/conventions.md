@@ -1,20 +1,61 @@
 # Конвенции кода («как писать правильно»)
 
-Главный документ по стилю. Все новые модули пишутся по образцу `services/auth/src/modules/auth` или `services/booking/src/modules/bookings` (booking реализован как эталон канона). Общий код берётся из `@booking/shared`, а не копируется.
+Главный документ по стилю. Эталон канона модуля — `services/auth/src/modules/user` и `services/auth/src/modules/auth` (плоская раскладка `<module>.<role>.ts`). Новый модуль создаётся по образцу. Общий код берётся из `@booking/shared`, а не копируется.
+
+> Модуль `services/booking/src/modules/bookings` пока на старой раскладке (`v1.route.ts`, `types/`, `models/`) — функционально эквивалентен, будет приведён к канону отдельно.
 
 ## Архитектурный стиль
 Гибрид: **чистая архитектура в ядре + идиомы Elysia на крае** (см. [adr/0004-architecture-style-hybrid.md](adr/0004-architecture-style-hybrid.md)).
 
 ```
-HTTP (Elysia)         v1.route.ts     валидация, подпись токена, формат ответа
-  └─ Service          service.ts      бизнес-логика, не зависит от Elysia
-       └─ Repo (port) repo.ts         только SQL, реализует интерфейс из types/ports
-            └─ DB     @booking/shared postgres, пул, транзакции
+HTTP (Elysia)         <name>.route.ts    валидация, подпись токена, формат ответа
+  └─ Service          <name>.service.ts  бизнес-логика, не зависит от Elysia
+       └─ Repo (port) <name>.repo.ts     только SQL, реализует интерфейс из <name>.port.ts
+            └─ DB     @booking/shared    postgres, пул, транзакции
 ```
 
 - **Бизнес-логика — в service**, SQL — только в repo, HTTP-специфика (статусы, токены, формат) — только в route.
 - service и repo — **чистые фабрики-замыкания**, не импортируют Elysia → тестируемость и портируемость.
-- Зависимости передаются явно: через аргументы фабрик и **порты** (`types/ports/*.port.ts`), а не через глобали.
+- Зависимости передаются явно: через аргументы фабрик и **порты** (`<name>.port.ts`), а не через глобали.
+
+### Раскладка модуля (плоский канон `<module>.<role>.ts`)
+Каталог `services/<svc>/src/modules/<name>/`, файлы по ролям — без подпапок `models/`/`types/`/`ports/`:
+
+| Файл | Роль | Ключевые экспорты |
+|---|---|---|
+| `<name>.model.ts`   | Elysia-модели `t.Object` + типы запросов | `XModels`, `XCreateRequest = (typeof XModels)['x.create']['static']` |
+| `<name>.entity.ts`  | доменная сущность / типы строк БД        | `X` (= колонки миграции), `XView` |
+| `<name>.port.ts`    | порты модуля                              | `IXRepo` **и** `IXService` |
+| `<name>.repo.ts`    | SQL-слой                                  | `xRepo(sql): IXRepo` |
+| `<name>.service.ts` | бизнес-логика                             | `xService(repo, ...deps): IXService` |
+| `<name>.route.ts`   | HTTP (v1)                                 | `xRouteV1(svc, deps): Elysia` |
+
+## Композиция модулей (модуль использует модуль)
+Модули общаются **только через service-порты**, связываются в composition root (`src/index.ts`).
+
+- Каждый модуль публикует свою поверхность как **`IXService`** в `<name>.port.ts`. Это единственное, на что смеют опираться другие модули.
+- Потребляющий модуль принимает зависимость **интерфейсом** в аргумент фабрики — не импортирует чужой `*.service.ts`/`*.repo.ts`/`sql`:
+  ```ts
+  // auth.service.ts — auth пользуется user-модулем через его порт
+  export const authService = (users: IUserService): IAuthService => ({
+    register: async (dto) => {
+      if (await users.findByEmail(dto.email)) throw new ConflictError('...', 'ALREADY_EXISTS')
+      const password_hash = await Bun.password.hash(dto.password)
+      return users.create({ email: dto.email, password_hash })
+    },
+    // ...
+  })
+  ```
+- Связывание — **только в `index.ts`** (composition root):
+  ```ts
+  const users = userService(userRepo(sql))   // самодостаточный модуль
+  const auth  = authService(users)            // auth → user через IUserService
+
+  .group('/api', (api) => api.group('/v1', (v1) => v1
+    .use(userRouteV1(users, { response, cfg }))
+    .use(authRouteV1(auth,  { response, cfg }))))
+  ```
+- Это то же DI через фабрики-замыкания и порты, что и для repo (см. [adr/0005-module-composition-ports.md](adr/0005-module-composition-ports.md)), распространённое на связь модуль↔модуль. Циклические зависимости между модулями — запрещены.
 
 ## Идиомы Elysia (канон)
 1. **1 инстанс = 1 контроллер.** Роуты — прямо на `new Elysia()`. НЕ выноси в класс-контроллер, принимающий весь `Context`.
@@ -46,17 +87,18 @@ HTTP (Elysia)         v1.route.ts     валидация, подпись ток�
 - **Миграции:** `MIGRATIONS[]` + `applyMigrations(sql, MIGRATIONS)` из shared.
 
 ## Чек-лист: новый модуль
-1. `modules/<name>/models/index.ts` — `t.Object`-модели + экспорт типов через `['static']`.
-2. `modules/<name>/types/entity.ts` — доменные типы; `types/ports/<name>.port.ts` — интерфейс repo.
-3. `modules/<name>/repo.ts` — реализация порта, только SQL.
-4. `modules/<name>/service.ts` — бизнес-логика, бросает `AppError`.
-5. `modules/<name>/v1.route.ts` — роуты, `.model(...)`, валидация `{ body: '<name>.<op>' }`, ответ через `responseMapper`.
-6. Подключить в `index.ts` внутри `.group('/api').group('/v1')`.
+1. `<name>.model.ts` — `t.Object`-модели + экспорт типов через `['static']`.
+2. `<name>.entity.ts` — доменные типы (имена полей = колонки миграции); `<name>.port.ts` — `IXRepo` + `IXService`.
+3. `<name>.repo.ts` — реализация `IXRepo`, только SQL.
+4. `<name>.service.ts` — бизнес-логика, реализует `IXService`, бросает `AppError`. Зависимости от других модулей — их портами (`IOtherService`) в аргументах фабрики.
+5. `<name>.route.ts` — роуты, `.model(...)`, валидация `{ body: '<name>.<op>' }`, ответ через `responseMapper`. Принимает `IXService`.
+6. Связать в `index.ts` (composition root) внутри `.group('/api').group('/v1')`; сюда же передаются зависимости между модулями.
 7. Миграции (если нужны) — в `src/migrations/index.ts` новым `version` (см. [database.md](database.md)).
 
 ## Анти-паттерны (НЕ делать)
 - Класс-контроллер с `(ctx: Context)`.
 - Дублирующие `interface` вместо вывода типов из `t`-моделей.
 - SQL вне repo; бизнес-логика в route; голые `throw new Error()` вместо `AppError`.
+- Импорт чужого `*.service.ts`/`*.repo.ts`/`sql` напрямую между модулями — только через `IXService` в аргументе фабрики (связывание в `index.ts`).
 - Конкатенация значений в SQL-строку (риск инъекций).
 - Имена колонок в коде, расходящиеся со схемой миграций (инцидент `email_verificated` vs `email_verified`).
