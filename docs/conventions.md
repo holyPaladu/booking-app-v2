@@ -84,7 +84,9 @@ HTTP (Elysia)         <name>.route.ts    валидация, подпись то
 - **Ответы:** только `responseMapper().success(message, data)` / `.error(code, message)`.
 - **Конфиг:** только `cfg.get('...')`; новые переменные добавляй в `src/config.ts` сервиса и `.env.example`.
 - **SQL:** теговые шаблоны `postgres`, всегда параметризованно (`${value}`). Многошаговые операции — через `withTransaction`.
+- **Транзакция через несколько repo:** методы repo принимают `exec?: Executor` (`= sql`); service открывает `runTx` (`TxRunner` из `src/lib/tx.ts`) и прокидывает `tx` в каждый вызов. Тяжёлый CPU (argon2) — ДО транзакции, чтобы держать её короткой. Внешние side-effect'ы (письмо) — не в транзакции напрямую, а заданием в `outbox` (доставит воркер после коммита).
 - **Миграции:** `MIGRATIONS[]` + `applyMigrations(sql, MIGRATIONS)` из shared.
+- **`src/schema/`:** инертные `*.entity`/`*.constant`-зеркала колонок миграций под ещё не реализованные модули. Когда модуль пишется — тип переезжает в `src/modules/<name>/` по канону.
 
 ## Чек-лист: новый модуль
 1. `<name>.model.ts` — `t.Object`-модели + экспорт типов через `['static']`.

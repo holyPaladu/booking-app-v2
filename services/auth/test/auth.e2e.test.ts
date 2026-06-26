@@ -1,42 +1,96 @@
 import { describe, expect, it } from 'bun:test'
 import { createConfigService, mapError, responseMapper } from '@booking/shared'
 import { Elysia } from 'elysia'
-import { authRouteV1 } from '../src/modules/routes/v1/auth.route'
-import { authService } from '../src/modules/services/auth.service'
-import type { IUserService } from '../src/modules/ports/user.port'
+import type { Executor, TxRunner } from '../src/lib/tx'
+import type { IAuditService } from '../src/modules/audit/audit.port'
+import type { IAuthRepo } from '../src/modules/auth/auth.port'
+import { authRouteV1 } from '../src/modules/auth/auth.route'
+import type { IHashService, IOtpService } from '../src/modules/auth/auth.security'
+import { authService } from '../src/modules/auth/auth.service'
+import type { IOutboxService, OutboxJob } from '../src/modules/outbox/outbox.port'
+import type { IUserService } from '../src/modules/user/user.port'
 
-// E2E через app.handle() с in-memory user-модулем — без Postgres.
-// auth не знает про БД: ему передаётся фейковый IUserService (та же подмена, что и в проде).
+// E2E через app.handle() с in-memory фейками всех портов — без Postgres.
+// runTx — pass-through: фейк-repo игнорируют executor, поэтому транзакция фиктивна.
 function buildApp() {
-  const rows: { id: string; email: string; password_hash: string; status: 'active' }[] = []
+  const rows: {
+    id: string
+    email: string
+    phone: string | null
+    password_hash: string
+    status: 'active'
+  }[] = []
+  const granted: string[] = []
+  const verifications: { user_id: string; token_hash: string }[] = []
+  const enqueued: OutboxJob[] = []
+  const audited: string[] = []
+
   const users: IUserService = {
-    create: async ({ email, password_hash }) => {
-      const u = { id: crypto.randomUUID(), email, password_hash, status: 'active' as const }
+    create: async ({ email, phone, password_hash }) => {
+      const u = {
+        id: crypto.randomUUID(),
+        email,
+        phone: phone ?? null,
+        password_hash,
+        status: 'active' as const,
+      }
       rows.push(u)
       return { id: u.id, email: u.email, status: u.status }
     },
-    findByEmail: async (email) => rows.find((u) => u.email === email),
+    getByEmail: async (email) => rows.find((u) => u.email === email),
+    getByPhone: async (phone) => {
+      const u = rows.find((r) => r.phone === phone)
+      return u && { id: u.id, email: u.email, status: u.status }
+    },
     getById: async (id) => {
       const u = rows.find((r) => r.id === id)
       return u && { id: u.id, email: u.email, status: u.status }
     },
+    findById: async (id) => {
+      const u = rows.find((r) => r.id === id)
+      if (!u) throw new Error('not found')
+      return { id: u.id, email: u.email, status: u.status }
+    },
   }
+
+  // Побочные записи auth с одним писателем — порт IAuthRepo.
+  const repo: IAuthRepo = {
+    grantDefaultRole: async (userId) => void granted.push(userId),
+    createVerificationToken: async (input) =>
+      void verifications.push({ user_id: input.user_id, token_hash: input.token_hash }),
+  }
+  const audit: IAuditService = { record: async (entry) => void audited.push(entry.event) }
+  const outbox: IOutboxService = { enqueue: async (job) => void enqueued.push(job) }
+  const hash: IHashService = {
+    hash: async (v) => `h:${v}`,
+    verify: async (v, h) => h === `h:${v}`,
+  }
+  const otp: IOtpService = {
+    generate: () => '123456',
+    hash: (code) => `oh:${code}`,
+    verify: (code, h) => h === `oh:${code}`,
+  }
+  const runTx: TxRunner = (work) => work(undefined as unknown as Executor)
+
+  const svc = authService({ users, repo, audit, outbox, hash, otp, runTx })
+
   const cfg = createConfigService({
     jwt_secret: { key: 'JWT_SECRET', default: 'test-secret' },
     jwt_expiry: { key: 'JWT_EXPIRY', default: '15m' },
   })
   const response = responseMapper()
-  const svc = authService(users)
-  return new Elysia()
+  const app = new Elysia()
     .onError(({ code, error, set }) => {
       const { status, body } = mapError(code, error, response)
       set.status = status
       return body
     })
     .group('/api', (api) => api.group('/v1', (v1) => v1.use(authRouteV1(svc, { response, cfg }))))
+
+  return { app, state: { rows, granted, verifications, enqueued, audited } }
 }
 
-const app = buildApp()
+const { app, state } = buildApp()
 async function call(method: string, path: string, body?: unknown) {
   const res = await app.handle(
     new Request(`http://localhost${path}`, {
@@ -48,12 +102,21 @@ async function call(method: string, path: string, body?: unknown) {
   return { status: res.status, json: (await res.json().catch(() => null)) as any }
 }
 
-describe('auth e2e (in-memory repo)', () => {
-  it('registers a new user', async () => {
+describe('auth e2e (in-memory ports)', () => {
+  it('registers a new user and runs the full critical path', async () => {
     const r = await call('POST', '/api/v1/auth/register', { email: 'a@b.com', password: 'secret1' })
     expect(r.status).toBe(200)
     expect(r.json.success).toBe(true)
-    expect(r.json.data.email).toBe('a@b.com')
+
+    // user создан, роль выдана, токен записан (только хэш), audit и outbox заполнены
+    expect(state.rows).toHaveLength(1)
+    expect(state.granted).toEqual([state.rows[0].id])
+    expect(state.verifications).toHaveLength(1)
+    expect(state.verifications[0].token_hash).toBe('oh:123456')
+    expect(state.audited).toContain('account_created')
+    expect(state.enqueued).toHaveLength(1)
+    expect(state.enqueued[0].topic).toBe('email.verification')
+    expect(state.enqueued[0].payload).toMatchObject({ email: 'a@b.com', otp: '123456' })
   })
 
   it('logs in and returns a real JWT', async () => {

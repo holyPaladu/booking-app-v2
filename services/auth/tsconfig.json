@@ -4,7 +4,9 @@
     "types": ["bun-types"],
     "baseUrl": ".",
     "paths": {
-      "@modules/*": ["src/modules/*"]
+      "@modules/*": ["src/modules/*"],
+      "@lib/*": ["src/lib/*"],
+      "@schema/*": ["src/schema/*"]
     }
   },
   "include": ["src", "test"]

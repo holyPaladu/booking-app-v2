@@ -24,6 +24,8 @@ bun run --filter booking-service dev
 - `src/config.ts` — схема env (`ConfigService` из shared).
 - `src/migrations/index.ts` — `MIGRATIONS[]` + `applyMigrations` из shared; трекинг в `schema_migrations`, гоняются на старте.
 - `src/modules/<name>/` — плоский канон `<name>.{model,entity,port,repo,service,route}.ts`: route (HTTP) → service (логика) → repo (SQL); `port.ts` держит `IXRepo` + `IXService`. Образец — `services/auth/src/modules/{user,auth}`. (booking ещё на старой раскладке `v1.route.ts`/`types/`/`models/`.)
+- auth-модули: `user` (самодостаточный), `auth` (register/login; владеет SQL побочных записей — роль/верификация/аудит — в `auth.repo`; адаптеры `auth.security` = hash+otp, `auth.notifier`), `outbox` (транзакционная доставка писем + воркер-поллер).
+- `src/lib/tx.ts` — `Executor`/`TxRunner` (нить транзакции через repo). `src/schema/` — инертные `*.entity`/`*.constant` под бэклог (RBAC/2FA/sessions), ещё не импортируются.
 - **Модуль использует модуль** только через `IXService` (порт), переданный в фабрику; связывается в `index.ts` (composition root). Пример: `auth.service(users: IUserService)`. См. [docs/adr/0005-module-composition-ports.md](docs/adr/0005-module-composition-ports.md).
 
 ## Конвенции (кратко; подробно — [docs/conventions.md](docs/conventions.md))
@@ -40,6 +42,7 @@ bun run --filter booking-service dev
 - Персональная память Claude (`~/.claude`) — для кросс-сессионных заметок ассистента, **не** для проектной документации.
 
 ## Известные TODO / бэклог
-- Refresh-токены + таблица `sessions`, email-верификация (схема в БД есть, код — нет).
+- Refresh-токены + таблица `sessions` (схема есть, код — нет).
+- Email-верификация: на регистрации уже создаётся OTP + `verification_tokens` и письмо ставится в `outbox` (доставляет воркер); **эндпоинта подтверждения кода ещё нет**.
 - Eden Treaty для типобезопасных вызовов auth↔booking.
 - В БД auth заложены RBAC/2FA/audit, но используются не полностью.

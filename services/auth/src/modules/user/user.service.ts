@@ -1,0 +1,18 @@
+import { NotFoundError } from '@booking/shared'
+import type { IUserRepo, IUserService } from './user.port'
+
+export const userService = (repo: IUserRepo): IUserService => {
+  return {
+    create: (input, exec) => repo.create(input, exec),
+
+    getByEmail: (email) => repo.findByEmail(email),
+    getByPhone: (phone) => repo.findByPhone(phone),
+    getById: (id) => repo.findById(id),
+
+    findById: async (id) => {
+      const user = await repo.findById(id)
+      if (!user) throw new NotFoundError('User not found', 'USER_NOT_FOUND')
+      return user
+    },
+  }
+}

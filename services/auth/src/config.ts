@@ -10,4 +10,5 @@ export const cfg = createConfigService({
   node_env: { key: 'NODE_ENV', default: 'development' },
   argon_memory: { key: 'ARGON_MEMORY', default: '65536' },
   argon_time_cost: { key: 'ARGON_TIME_COST', default: '3' },
+  outbox_poll_ms: { key: 'OUTBOX_POLL_MS', default: '2000' },
 })

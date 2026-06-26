@@ -323,4 +323,39 @@ const MIGRATIONS: Migration[] = [
       await sql`CREATE INDEX idx_login_attempts_ip         ON login_attempts (ip_address, created_at DESC)`
     },
   },
+
+  {
+    version: '009_create_outbox',
+    up: async (sql) => {
+      await sql`
+        CREATE TABLE outbox (
+          id         UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
+          topic      VARCHAR(100) NOT NULL,
+          payload    JSONB        NOT NULL,
+          status     VARCHAR(20)  NOT NULL DEFAULT 'pending',
+          attempts   SMALLINT     NOT NULL DEFAULT 0,
+          last_error TEXT,
+          created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+          sent_at    TIMESTAMPTZ,
+
+          CONSTRAINT outbox_status_check CHECK (status IN ('pending', 'sent', 'failed'))
+        )
+      `
+      // Поллер выбирает pending в порядке создания.
+      await sql`
+        CREATE INDEX idx_outbox_pending
+          ON outbox (created_at)
+          WHERE status = 'pending'
+      `
+    },
+  },
+
+  {
+    version: '010_audit_account_created',
+    up: async (sql) => {
+      // ADD VALUE можно в транзакции (PG12+), но НЕ использовать в той же транзакции —
+      // здесь значение только добавляется, применяется уже в рантайме.
+      await sql`ALTER TYPE audit_event ADD VALUE IF NOT EXISTS 'account_created'`
+    },
+  },
 ]
