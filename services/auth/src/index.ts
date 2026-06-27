@@ -19,6 +19,10 @@ import { outboxService } from '@modules/outbox/outbox.service'
 import { startOutboxWorker } from '@modules/outbox/outbox.worker'
 import { sessionRepo } from '@modules/session/session.repo'
 import { sessionService } from '@modules/session/session.service'
+import { twoFactorRepo } from '@modules/two-factor/two-factor.repo'
+import { twoFactorRouteV1 } from '@modules/two-factor/two-factor.route'
+import { twoFactorSecurity } from '@modules/two-factor/two-factor.security'
+import { twoFactorService } from '@modules/two-factor/two-factor.service'
 import { userRepo } from '@modules/user/user.repo'
 import { userRouteV1 } from '@modules/user/user.route'
 import { userService } from '@modules/user/user.service'
@@ -40,6 +44,18 @@ async function bootstrap() {
   const runTx: TxRunner = <T>(work: (tx: Executor) => Promise<T>) =>
     withTransaction(sql, work) as Promise<T>
 
+  const twoFactor = twoFactorService({
+    repo: twoFactorRepo(sql),
+    audit,
+    security: twoFactorSecurity({
+      encKey: cfg.get('two_factor_enc_key'),
+      issuer: cfg.get('two_factor_issuer'),
+      window: cfg.getNumber('two_factor_window'),
+      recoveryCodesCount: cfg.getNumber('recovery_codes_count'),
+    }),
+    runTx,
+  })
+
   const auth = authService({
     users,
     repo: authRepo(sql),
@@ -49,6 +65,7 @@ async function bootstrap() {
     outbox: outboxService(outbox), // наружу — только enqueue (service-порт)
     hash: hashService(),
     otp: otpService(),
+    twoFactor,
     runTx,
   })
 
@@ -78,7 +95,10 @@ async function bootstrap() {
     .get('/health', () => response.success<{ status: 'ok' }>('Service live!', { status: 'ok' }))
     .group('/api', (api) =>
       api.group('/v1', (v1) =>
-        v1.use(userRouteV1(users, { response, cfg })).use(authRouteV1(auth, { response, cfg })),
+        v1
+          .use(userRouteV1(users, { response, cfg }))
+          .use(authRouteV1(auth, { response, cfg }))
+          .use(twoFactorRouteV1(twoFactor, { response, cfg })),
       ),
     )
     .listen(cfg.getNumber('port'))

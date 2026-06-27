@@ -4,6 +4,7 @@ import type { IAuditService } from '@modules/audit/audit.port'
 import type { ILoginAttemptService } from '@modules/login-attempt/login-attempt.port'
 import type { IOutboxService } from '@modules/outbox/outbox.port'
 import type { ISessionService } from '@modules/session/session.port'
+import type { ITwoFactorService } from '@modules/two-factor/two-factor.port'
 import type { IUserService } from '@modules/user/user.port'
 import { AUDIT_EVENT, VERIFICATION_CHANNEL, VERIFICATION_TYPE } from './auth.const'
 import type { IAuthRepo, IAuthService } from './auth.port'
@@ -20,11 +21,12 @@ export type AuthServiceDeps = {
   outbox: IOutboxService
   hash: IHashService
   otp: IOtpService
+  twoFactor: ITwoFactorService
   runTx: TxRunner
 }
 
 export const authService = (deps: AuthServiceDeps): IAuthService => {
-  const { users, repo, audit, loginAttempts, session, outbox, hash, otp, runTx } = deps
+  const { users, repo, audit, loginAttempts, session, outbox, hash, otp, twoFactor, runTx } = deps
 
   return {
     register: async (dto) => {
@@ -111,10 +113,15 @@ export const authService = (deps: AuthServiceDeps): IAuthService => {
 
       // 5. 2FA-гейт: пароль верный, но при включённой 2FA токены не выдаём.
       //    Попытку фиксируем как успешную (это не brute-force), аудит login_success
-      //    отложен до завершения 2FA (отдельный эндпоинт).
-      if (await repo.isTwoFactorEnabled(user.id)) {
+      //    отложен до completeLogin. email/token_version уйдут в challenge-токен.
+      if (await twoFactor.isEnabled(user.id)) {
         await loginAttempts.record(dto.email, ip, true)
-        return { kind: 'two_factor_required', userId: user.id }
+        return {
+          kind: 'two_factor_required',
+          userId: user.id,
+          email: user.email,
+          tokenVersion: user.token_version,
+        }
       }
 
       // 6. Полный логин атомарно: сессия (refresh) + login_attempt + audit.
@@ -133,6 +140,38 @@ export const authService = (deps: AuthServiceDeps): IAuthService => {
           refreshExpiresAt: issued.expiresAt,
         }
       })
+    },
+
+    completeLogin: async (input, code, ctx) => {
+      const { ip, userAgent } = ctx
+
+      // Тот же троттлинг, что и в startLogin: /login/2fa — отдельный эндпоинт, поэтому
+      // защищаем его от перебора TOTP/recovery независимо.
+      await loginAttempts.checkLimit(input.email, ip)
+
+      try {
+        // Проверка 2FA-кода и выпуск сессии — атомарно (списание recovery-кода
+        // откатится вместе с сессией при сбое).
+        return await runTx(async (tx: Executor) => {
+          await twoFactor.verifyForLogin(input.userId, code, tx)
+          const issued = await session.issue(
+            { userId: input.userId, tokenVersion: input.tokenVersion, ip, userAgent },
+            tx,
+          )
+          await loginAttempts.record(input.email, ip, true, tx)
+          await audit.record({ user_id: input.userId, event: AUDIT_EVENT.LOGIN_SUCCESS }, tx)
+
+          return {
+            identity: { id: input.userId, email: input.email },
+            refreshToken: issued.refreshToken,
+            refreshExpiresAt: issued.expiresAt,
+          }
+        })
+      } catch (err) {
+        // Неверный код — фиксируем неудачную попытку (вне откаченной транзакции).
+        if (err instanceof UnauthorizedError) await loginAttempts.record(input.email, ip, false)
+        throw err
+      }
     },
   }
 }

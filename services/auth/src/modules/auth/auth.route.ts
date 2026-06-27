@@ -1,5 +1,6 @@
-import type { createConfigService, responseMapper } from '@booking/shared'
+import { UnauthorizedError, type createConfigService, type responseMapper } from '@booking/shared'
 import { jwt } from '@elysiajs/jwt'
+import { CHALLENGE_SCOPE } from '@modules/two-factor/two-factor.const'
 import { Elysia } from 'elysia'
 import { authModels } from './auth.model'
 import type { IAuthService } from './auth.port'
@@ -18,6 +19,14 @@ export const authRouteV1 = (svc: IAuthService, deps: RouteDeps) =>
         exp: deps.cfg.get('jwt_expiry'),
       }),
     )
+    // Отдельный инстанс для короткого 2FA-challenge: тот же секрет, свой exp.
+    .use(
+      jwt({
+        name: 'challengeJwt',
+        secret: deps.cfg.get('jwt_secret'),
+        exp: deps.cfg.get('two_factor_challenge_ttl'),
+      }),
+    )
     .model(authModels)
 
     .post(
@@ -31,17 +40,25 @@ export const authRouteV1 = (svc: IAuthService, deps: RouteDeps) =>
 
     .post(
       '/login',
-      async ({ body, jwt, server, request }) => {
+      async ({ body, jwt, challengeJwt, server, request }) => {
         const ip = server?.requestIP(request)?.address ?? null
         const userAgent = request.headers.get('user-agent') ?? null
 
         const result = await svc.startLogin(body, { ip, userAgent })
 
-        if (result.kind === 'two_factor_required')
+        // 2FA включена: токены не выдаём, отдаём короткий challenge-токен для шага-2.
+        if (result.kind === 'two_factor_required') {
+          const challenge_token = await challengeJwt.sign({
+            sub: result.userId,
+            email: result.email,
+            tv: result.tokenVersion,
+            scope: CHALLENGE_SCOPE,
+          })
           return deps.response.success('Two-factor required', {
             two_factor_required: true,
-            user_id: result.userId,
+            challenge_token,
           })
+        }
 
         const access_token = await jwt.sign({
           sub: result.identity.id,
@@ -54,4 +71,37 @@ export const authRouteV1 = (svc: IAuthService, deps: RouteDeps) =>
         })
       },
       { body: 'auth.login' },
+    )
+
+    .post(
+      '/login/2fa',
+      async ({ body, jwt, challengeJwt, server, request }) => {
+        const payload = await challengeJwt.verify(body.challenge_token)
+        if (!payload || payload.scope !== CHALLENGE_SCOPE)
+          throw new UnauthorizedError('Invalid or expired challenge', 'INVALID_CHALLENGE')
+
+        const ip = server?.requestIP(request)?.address ?? null
+        const userAgent = request.headers.get('user-agent') ?? null
+
+        const result = await svc.completeLogin(
+          {
+            userId: payload.sub as string,
+            email: payload.email as string,
+            tokenVersion: Number(payload.tv),
+          },
+          body.code,
+          { ip, userAgent },
+        )
+
+        const access_token = await jwt.sign({
+          sub: result.identity.id,
+          email: result.identity.email,
+        })
+        return deps.response.success('Logged in', {
+          access_token,
+          refresh_token: result.refreshToken,
+          token_type: 'Bearer',
+        })
+      },
+      { body: 'auth.login-2fa' },
     )

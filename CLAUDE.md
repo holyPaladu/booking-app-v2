@@ -24,7 +24,7 @@ bun run --filter booking-service dev
 - `src/config.ts` — схема env (`ConfigService` из shared).
 - `src/migrations/index.ts` — `MIGRATIONS[]` + `applyMigrations` из shared; трекинг в `schema_migrations`, гоняются на старте.
 - `src/modules/<name>/` — плоский канон `<name>.{model,entity,port,repo,service,route}.ts`: route (HTTP) → service (логика) → repo (SQL); `port.ts` держит `IXRepo` + `IXService`. Образец — `services/auth/src/modules/{user,auth}`. (booking ещё на старой раскладке `v1.route.ts`/`types/`/`models/`.)
-- auth-модули: `user` (самодостаточный), `auth` (register/login; владеет SQL побочных записей — роль/верификация/аудит — в `auth.repo`; адаптеры `auth.security` = hash+otp, `auth.notifier`), `outbox` (транзакционная доставка писем + воркер-поллер).
+- auth-модули: `user` (самодостаточный), `auth` (register/login + завершение 2FA-логина `completeLogin`; владеет SQL побочных записей — роль/верификация/аудит — в `auth.repo`; адаптеры `auth.security` = hash+otp, `auth.notifier`), `two-factor` (TOTP setup/confirm/disable/recovery + гейт `isEnabled` для логина; владеет `two_factor_secrets`/`two_factor_recovery_codes`; адаптер `two-factor.security` = TOTP/base32/AES-GCM/recovery — см. [docs/adr/0006-two-factor-module.md](docs/adr/0006-two-factor-module.md)), `outbox` (транзакционная доставка писем + воркер-поллер).
 - `src/lib/tx.ts` — `Executor`/`TxRunner` (нить транзакции через repo). `src/schema/` — инертные `*.entity`/`*.constant` под бэклог (RBAC/2FA/sessions), ещё не импортируются.
 - **Модуль использует модуль** только через `IXService` (порт), переданный в фабрику; связывается в `index.ts` (composition root). Пример: `auth.service(users: IUserService)`. См. [docs/adr/0005-module-composition-ports.md](docs/adr/0005-module-composition-ports.md).
 
@@ -45,4 +45,5 @@ bun run --filter booking-service dev
 - Refresh-токены + таблица `sessions` (схема есть, код — нет).
 - Email-верификация: на регистрации уже создаётся OTP + `verification_tokens` и письмо ставится в `outbox` (доставляет воркер); **эндпоинта подтверждения кода ещё нет**.
 - Eden Treaty для типобезопасных вызовов auth↔booking.
-- В БД auth заложены RBAC/2FA/audit, но используются не полностью.
+- 2FA (TOTP) реализована модулем `two-factor`: setup/confirm/disable/recovery + завершение логина `/auth/login/2fa` через challenge-токен. Требует env `TWO_FACTOR_ENC_KEY` (base64 32 байта).
+- В БД auth заложены RBAC/audit, но используются не полностью.

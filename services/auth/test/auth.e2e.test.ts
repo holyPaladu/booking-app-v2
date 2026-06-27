@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { createConfigService, mapError, responseMapper } from '@booking/shared'
+import { UnauthorizedError, createConfigService, mapError, responseMapper } from '@booking/shared'
 import { Elysia } from 'elysia'
 import type { Executor, TxRunner } from '../src/lib/tx'
 import type { IAuditService } from '../src/modules/audit/audit.port'
@@ -10,6 +10,7 @@ import { authService } from '../src/modules/auth/auth.service'
 import type { ILoginAttemptService } from '../src/modules/login-attempt/login-attempt.port'
 import type { IOutboxService, OutboxJob } from '../src/modules/outbox/outbox.port'
 import type { ISessionService } from '../src/modules/session/session.port'
+import type { ITwoFactorService } from '../src/modules/two-factor/two-factor.port'
 import type { IUserService } from '../src/modules/user/user.port'
 
 // E2E через app.handle() с in-memory фейками всех портов — без Postgres.
@@ -72,7 +73,17 @@ function buildApp() {
     grantDefaultRole: async (userId) => void granted.push(userId),
     createVerificationToken: async (input) =>
       void verifications.push({ user_id: input.user_id, token_hash: input.token_hash }),
-    isTwoFactorEnabled: async (userId) => twoFaUsers.has(userId),
+  }
+  // 2FA-модуль через service-порт: гейт по twoFaUsers, фиктивный код '654321'.
+  const twoFactor: ITwoFactorService = {
+    isEnabled: async (userId) => twoFaUsers.has(userId),
+    setup: async () => ({ secret: 'SECRET', otpauth_uri: 'otpauth://totp/x' }),
+    confirm: async () => ({ recovery_codes: ['aaaa-bbbb'] }),
+    disable: async () => {},
+    regenerateRecoveryCodes: async () => ({ recovery_codes: ['cccc-dddd'] }),
+    verifyForLogin: async (_userId, code) => {
+      if (code !== '654321') throw new UnauthorizedError('Invalid 2FA code', 'INVALID_2FA')
+    },
   }
   const audit: IAuditService = { record: async (entry) => void audited.push(entry.event) }
   const loginAttempts: ILoginAttemptService = {
@@ -102,11 +113,23 @@ function buildApp() {
   }
   const runTx: TxRunner = (work) => work(undefined as unknown as Executor)
 
-  const svc = authService({ users, repo, audit, loginAttempts, session, outbox, hash, otp, runTx })
+  const svc = authService({
+    users,
+    repo,
+    audit,
+    loginAttempts,
+    session,
+    outbox,
+    hash,
+    otp,
+    twoFactor,
+    runTx,
+  })
 
   const cfg = createConfigService({
     jwt_secret: { key: 'JWT_SECRET', default: 'test-secret' },
     jwt_expiry: { key: 'JWT_EXPIRY', default: '15m' },
+    two_factor_challenge_ttl: { key: 'TWO_FACTOR_CHALLENGE_TTL', default: '5m' },
   })
   const response = responseMapper()
   const app = new Elysia()
@@ -134,6 +157,8 @@ async function call(method: string, path: string, body?: unknown) {
   )
   return { status: res.status, json: (await res.json().catch(() => null)) as any }
 }
+
+let challengeToken = '' // переносим challenge между шагом-1 и шагом-2 логина
 
 describe('auth e2e (in-memory ports)', () => {
   it('registers a new user and runs the full critical path', async () => {
@@ -171,17 +196,46 @@ describe('auth e2e (in-memory ports)', () => {
     expect(state.audited).toContain('login_success')
   })
 
-  it('short-circuits with two_factor_required when 2FA enabled (no tokens, no session)', async () => {
+  it('short-circuits with two_factor_required (challenge token, no tokens, no session)', async () => {
     state.twoFaUsers.add(state.rows[0].id)
     const before = state.sessionsCreated.length
 
     const r = await call('POST', '/api/v1/auth/login', { email: 'a@b.com', password: 'secret1' })
     expect(r.status).toBe(200)
     expect(r.json.data.two_factor_required).toBe(true)
-    expect(r.json.data.user_id).toBe(state.rows[0].id)
+    expect(typeof r.json.data.challenge_token).toBe('string')
     expect(r.json.data.access_token).toBeUndefined()
     expect(r.json.data.refresh_token).toBeUndefined()
     expect(state.sessionsCreated).toHaveLength(before) // сессия не создана
+
+    challengeToken = r.json.data.challenge_token
+  })
+
+  it('completes 2FA login with a valid code and returns access + refresh tokens', async () => {
+    const before = state.sessionsCreated.length
+
+    const r = await call('POST', '/api/v1/auth/login/2fa', {
+      challenge_token: challengeToken,
+      code: '654321',
+    })
+    expect(r.status).toBe(200)
+    expect(typeof r.json.data.access_token).toBe('string')
+    expect(typeof r.json.data.refresh_token).toBe('string')
+    expect(r.json.data.token_type).toBe('Bearer')
+    expect(state.sessionsCreated).toHaveLength(before + 1)
+  })
+
+  it('rejects an invalid 2FA code with 401', async () => {
+    const login = await call('POST', '/api/v1/auth/login', {
+      email: 'a@b.com',
+      password: 'secret1',
+    })
+    const r = await call('POST', '/api/v1/auth/login/2fa', {
+      challenge_token: login.json.data.challenge_token,
+      code: '000000',
+    })
+    expect(r.status).toBe(401)
+    expect(r.json.code).toBe('INVALID_2FA')
 
     state.twoFaUsers.delete(state.rows[0].id)
   })
