@@ -25,4 +25,14 @@ export const authRepo = (sql: SqlClient): IAuthRepo => ({
       )
     `
   },
+
+  isTwoFactorEnabled: async (userId, exec = sql) => {
+    const [{ enabled }] = await exec<[{ enabled: boolean }]>`
+      SELECT EXISTS(
+        SELECT 1 FROM two_factor_secrets
+        WHERE user_id = ${userId} AND enabled = TRUE AND confirmed_at IS NOT NULL
+      ) AS enabled
+    `
+    return enabled
+  },
 })

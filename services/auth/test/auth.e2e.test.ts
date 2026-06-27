@@ -7,7 +7,9 @@ import type { IAuthRepo } from '../src/modules/auth/auth.port'
 import { authRouteV1 } from '../src/modules/auth/auth.route'
 import type { IHashService, IOtpService } from '../src/modules/auth/auth.security'
 import { authService } from '../src/modules/auth/auth.service'
+import type { ILoginAttemptService } from '../src/modules/login-attempt/login-attempt.port'
 import type { IOutboxService, OutboxJob } from '../src/modules/outbox/outbox.port'
+import type { ISessionService } from '../src/modules/session/session.port'
 import type { IUserService } from '../src/modules/user/user.port'
 
 // E2E через app.handle() с in-memory фейками всех портов — без Postgres.
@@ -16,23 +18,35 @@ function buildApp() {
   const rows: {
     id: string
     email: string
+    email_verified: boolean
     phone: string | null
     password_hash: string
     status: 'active'
+    banned_reason: string | null
+    banned_at: Date | null
+    banned_by: string | null
+    token_version: number
   }[] = []
   const granted: string[] = []
   const verifications: { user_id: string; token_hash: string }[] = []
   const enqueued: OutboxJob[] = []
   const audited: string[] = []
+  const sessionsCreated: { userId: string; refreshToken: string }[] = []
+  const twoFaUsers = new Set<string>() // user_id с включённой 2FA
 
   const users: IUserService = {
     create: async ({ email, phone, password_hash }) => {
       const u = {
         id: crypto.randomUUID(),
         email,
+        email_verified: false,
         phone: phone ?? null,
         password_hash,
         status: 'active' as const,
+        banned_reason: null,
+        banned_at: null,
+        banned_by: null,
+        token_version: 0,
       }
       rows.push(u)
       return { id: u.id, email: u.email, status: u.status }
@@ -58,8 +72,24 @@ function buildApp() {
     grantDefaultRole: async (userId) => void granted.push(userId),
     createVerificationToken: async (input) =>
       void verifications.push({ user_id: input.user_id, token_hash: input.token_hash }),
+    isTwoFactorEnabled: async (userId) => twoFaUsers.has(userId),
   }
   const audit: IAuditService = { record: async (entry) => void audited.push(entry.event) }
+  const loginAttempts: ILoginAttemptService = {
+    record: async () => {},
+    checkLimit: async () => {},
+  }
+  const session: ISessionService = {
+    issue: async (input) => {
+      const refreshToken = `rt:${crypto.randomUUID()}`
+      sessionsCreated.push({ userId: input.userId, refreshToken })
+      return {
+        sessionId: crypto.randomUUID(),
+        refreshToken,
+        expiresAt: new Date(Date.now() + 1000),
+      }
+    },
+  }
   const outbox: IOutboxService = { enqueue: async (job) => void enqueued.push(job) }
   const hash: IHashService = {
     hash: async (v) => `h:${v}`,
@@ -72,7 +102,7 @@ function buildApp() {
   }
   const runTx: TxRunner = (work) => work(undefined as unknown as Executor)
 
-  const svc = authService({ users, repo, audit, outbox, hash, otp, runTx })
+  const svc = authService({ users, repo, audit, loginAttempts, session, outbox, hash, otp, runTx })
 
   const cfg = createConfigService({
     jwt_secret: { key: 'JWT_SECRET', default: 'test-secret' },
@@ -87,7 +117,10 @@ function buildApp() {
     })
     .group('/api', (api) => api.group('/v1', (v1) => v1.use(authRouteV1(svc, { response, cfg }))))
 
-  return { app, state: { rows, granted, verifications, enqueued, audited } }
+  return {
+    app,
+    state: { rows, granted, verifications, enqueued, audited, sessionsCreated, twoFaUsers },
+  }
 }
 
 const { app, state } = buildApp()
@@ -119,15 +152,38 @@ describe('auth e2e (in-memory ports)', () => {
     expect(state.enqueued[0].payload).toMatchObject({ email: 'a@b.com', otp: '123456' })
   })
 
-  it('logs in and returns a real JWT', async () => {
+  it('logs in and returns access + refresh tokens', async () => {
     const r = await call('POST', '/api/v1/auth/login', { email: 'a@b.com', password: 'secret1' })
     expect(r.status).toBe(200)
-    const token: string = r.json.data.token
-    expect(typeof token).toBe('string')
-    const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString())
+
+    const access: string = r.json.data.access_token
+    expect(typeof access).toBe('string')
+    const payload = JSON.parse(Buffer.from(access.split('.')[1], 'base64url').toString())
     expect(payload.email).toBe('a@b.com')
     expect(payload.sub).toBeTruthy()
     expect(payload.exp).toBeTruthy()
+
+    // refresh-токен выдан и создана сессия с привязкой к пользователю
+    expect(typeof r.json.data.refresh_token).toBe('string')
+    expect(r.json.data.token_type).toBe('Bearer')
+    expect(state.sessionsCreated).toHaveLength(1)
+    expect(state.sessionsCreated[0].userId).toBe(state.rows[0].id)
+    expect(state.audited).toContain('login_success')
+  })
+
+  it('short-circuits with two_factor_required when 2FA enabled (no tokens, no session)', async () => {
+    state.twoFaUsers.add(state.rows[0].id)
+    const before = state.sessionsCreated.length
+
+    const r = await call('POST', '/api/v1/auth/login', { email: 'a@b.com', password: 'secret1' })
+    expect(r.status).toBe(200)
+    expect(r.json.data.two_factor_required).toBe(true)
+    expect(r.json.data.user_id).toBe(state.rows[0].id)
+    expect(r.json.data.access_token).toBeUndefined()
+    expect(r.json.data.refresh_token).toBeUndefined()
+    expect(state.sessionsCreated).toHaveLength(before) // сессия не создана
+
+    state.twoFaUsers.delete(state.rows[0].id)
   })
 
   it('rejects wrong password with 401', async () => {

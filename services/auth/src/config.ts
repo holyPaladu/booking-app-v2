@@ -6,6 +6,7 @@ export const cfg = createConfigService({
   db_url: { key: 'DB_URL', required: true },
   jwt_secret: { key: 'JWT_SECRET', required: true },
   jwt_expiry: { key: 'JWT_EXPIRY', default: '15m' },
+  refresh_ttl_days: { key: 'REFRESH_TTL_DAYS', default: '30' },
   port: { key: 'PORT', default: '3000' },
   node_env: { key: 'NODE_ENV', default: 'development' },
   argon_memory: { key: 'ARGON_MEMORY', default: '65536' },

@@ -31,10 +31,27 @@ export const authRouteV1 = (svc: IAuthService, deps: RouteDeps) =>
 
     .post(
       '/login',
-      async ({ body, jwt }) => {
-        const identity = await svc.login(body)
-        const token = await jwt.sign({ sub: identity.id, email: identity.email })
-        return deps.response.success('Logged in', { token })
+      async ({ body, jwt, server, request }) => {
+        const ip = server?.requestIP(request)?.address ?? null
+        const userAgent = request.headers.get('user-agent') ?? null
+
+        const result = await svc.startLogin(body, { ip, userAgent })
+
+        if (result.kind === 'two_factor_required')
+          return deps.response.success('Two-factor required', {
+            two_factor_required: true,
+            user_id: result.userId,
+          })
+
+        const access_token = await jwt.sign({
+          sub: result.identity.id,
+          email: result.identity.email,
+        })
+        return deps.response.success('Logged in', {
+          access_token,
+          refresh_token: result.refreshToken,
+          token_type: 'Bearer',
+        })
       },
       { body: 'auth.login' },
     )

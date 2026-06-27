@@ -10,11 +10,15 @@ import { auditService } from '@modules/audit/audit.service'
 import { logNotifier } from '@modules/auth/auth.notifier'
 import { authRepo } from '@modules/auth/auth.repo'
 import { authRouteV1 } from '@modules/auth/auth.route'
-import { hashService, otpService } from '@modules/auth/auth.security'
+import { hashService, otpService, refreshTokenService } from '@modules/auth/auth.security'
 import { authService } from '@modules/auth/auth.service'
+import { loginAttemptRepo } from '@modules/login-attempt/login-attempt.repo'
+import { loginAttemptService } from '@modules/login-attempt/login-attempt.service'
 import { outboxRepo } from '@modules/outbox/outbox.repo'
 import { outboxService } from '@modules/outbox/outbox.service'
 import { startOutboxWorker } from '@modules/outbox/outbox.worker'
+import { sessionRepo } from '@modules/session/session.repo'
+import { sessionService } from '@modules/session/session.service'
 import { userRepo } from '@modules/user/user.repo'
 import { userRouteV1 } from '@modules/user/user.route'
 import { userService } from '@modules/user/user.service'
@@ -27,6 +31,10 @@ async function bootstrap() {
   // Модули
   const users = userService(userRepo(sql))
   const audit = auditService(auditRepo(sql))
+  const loginAttempts = loginAttemptService(loginAttemptRepo(sql))
+  const sessions = sessionService(refreshTokenService(), sessionRepo(sql), {
+    ttlDays: cfg.getNumber('refresh_ttl_days'),
+  })
   const outbox = outboxRepo(sql) // repo: enqueue + claim/mark (для воркера)
   const notifier = logNotifier()
   const runTx: TxRunner = <T>(work: (tx: Executor) => Promise<T>) =>
@@ -36,6 +44,8 @@ async function bootstrap() {
     users,
     repo: authRepo(sql),
     audit,
+    loginAttempts,
+    session: sessions,
     outbox: outboxService(outbox), // наружу — только enqueue (service-порт)
     hash: hashService(),
     otp: otpService(),

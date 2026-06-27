@@ -13,7 +13,7 @@ export const userRepo = (sql: SqlClient): IUserRepo => ({
   },
   findByEmail: async (email, exec = sql) => {
     const [row] = await exec<UserCredentials[]>`
-      SELECT id, email, password_hash
+      SELECT id, email, password_hash, email_verified, status, banned_at, banned_by, banned_reason, token_version
       FROM users
       WHERE email = ${email} AND deleted_at IS NULL
     `

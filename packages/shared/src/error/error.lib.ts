@@ -53,6 +53,12 @@ export class UnprocessableError extends AppError {
   }
 }
 
+export class TooManyRequestsError extends AppError {
+  constructor(message = 'Too many requests', code = 'TOO_MANY_REQUESTS') {
+    super(429, code, message)
+  }
+}
+
 export class InternalError extends AppError {
   constructor(message = 'Internal server error', code = 'INTERNAL_ERROR') {
     super(500, code, message)

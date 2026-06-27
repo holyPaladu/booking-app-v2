@@ -5,7 +5,7 @@ export interface UserEntity {
   id: string
 
   email: string
-  emailVerified: boolean
+  email_verified: boolean
 
   phone: string | null
   phone_verified: boolean
@@ -30,5 +30,17 @@ export interface UserEntity {
 // То, что отдаём наружу (без чувствительных полей).
 export type UserView = Pick<UserEntity, 'id' | 'email' | 'status'>
 
-// Для auth-флоу (login) нужен хэш пароля — отдаём отдельным типом, не наружу.
-export type UserCredentials = Pick<UserEntity, 'id' | 'email' | 'password_hash'>
+// Для auth-флоу (login) нужен хэш пароля и token_version (для refresh-сессии) —
+// отдаём отдельным типом, не наружу.
+export type UserCredentials = Pick<
+  UserEntity,
+  | 'id'
+  | 'email'
+  | 'password_hash'
+  | 'email_verified'
+  | 'status'
+  | 'banned_at'
+  | 'banned_by'
+  | 'banned_reason'
+  | 'token_version'
+>

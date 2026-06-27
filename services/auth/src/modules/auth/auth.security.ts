@@ -14,6 +14,13 @@ export type IOtpService = {
   verify: (otp: string, hash: string) => boolean
 }
 
+// Refresh-токен: непрозрачная случайная строка; в БД (sessions) хранится только её
+// SHA-256-хэш. Сравнение при ротации — по равенству хэшей.
+export type IRefreshTokenService = {
+  generate: () => string
+  hash: (token: string) => string
+}
+
 export const hashService = (): IHashService => {
   const hashConfig = {
     algorithm: 'argon2id',
@@ -54,4 +61,15 @@ export const otpService = (): IOtpService => ({
     for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ hash.charCodeAt(i)
     return diff === 0
   },
+})
+
+export const refreshTokenService = (): IRefreshTokenService => ({
+  // 32 байта энтропии → hex. crypto.getRandomValues — Web Crypto глобал в Bun
+  // (тот же, что и в randomOtp выше), НЕ node:crypto.
+  generate: () => {
+    const buf = new Uint8Array(32)
+    crypto.getRandomValues(buf)
+    return Array.from(buf, (b) => b.toString(16).padStart(2, '0')).join('')
+  },
+  hash: (token) => sha256(token),
 })
