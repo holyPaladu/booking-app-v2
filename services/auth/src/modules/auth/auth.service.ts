@@ -1,11 +1,11 @@
 import { ConflictError, NotFoundError, UnauthorizedError } from '@booking/shared'
-import type { Executor, TxRunner } from '@lib/tx'
-import type { IAuditService } from '@modules/audit/audit.port'
-import type { ILoginAttemptService } from '@modules/login-attempt/login-attempt.port'
-import type { IOutboxService } from '@modules/outbox/outbox.port'
-import type { ISessionService } from '@modules/session/session.port'
-import type { ITwoFactorService } from '@modules/two-factor/two-factor.port'
-import type { IUserService } from '@modules/user/user.port'
+import type { TxRunner } from '@lib/tx'
+import type { IAuditService } from '@modules/audit'
+import type { ILoginAttemptService } from '@modules/login-attempt'
+import type { IOutboxService } from '@modules/outbox'
+import type { ISessionService } from '@modules/session'
+import type { ITwoFactorService } from '@modules/two-factor'
+import type { IUserService } from '@modules/user'
 import { AUDIT_EVENT, VERIFICATION_CHANNEL, VERIFICATION_TYPE } from './auth.const'
 import type { IAuthRepo, IAuthService } from './auth.port'
 import type { IHashService, IOtpService } from './auth.security'
@@ -39,46 +39,41 @@ export const authService = (deps: AuthServiceDeps): IAuthService => {
         throw new ConflictError('Phone already registered', 'ALREADY_EXISTS')
 
       // 3. тяжёлый argon2 — ДО транзакции, чтобы держать tx коротким.
-      const password_hash = await hash.hash(dto.password)
+      const passwordHash = await hash.hash(dto.password)
 
       // 4. OTP: наружу уйдёт код, в БД — только его хэш.
       const code = otp.generate()
-      const token_hash = otp.hash(code)
+      const tokenHash = otp.hash(code)
       const expiresAt = new Date(Date.now() + OTP_TTL_MS).toISOString()
 
       // 5. Критический путь атомарно: user + роль + verification_token + audit + outbox.
       //    Любой сбой → rollback, наружу честная ошибка, полусоздания нет.
-      await runTx(async (tx: Executor) => {
-        const user = await users.create(
-          { email: dto.email, phone: dto.phone ?? null, password_hash },
-          tx,
-        )
+      await runTx(async () => {
+        const user = await users.create({
+          email: dto.email,
+          phone: dto.phone ?? null,
+          passwordHash,
+        })
 
-        await repo.grantDefaultRole(user.id, tx)
+        await repo.grantDefaultRole(user.id)
 
-        await repo.createVerificationToken(
-          {
-            user_id: user.id,
-            type: VERIFICATION_TYPE.EMAIL_CONFIRM,
-            channel: VERIFICATION_CHANNEL.EMAIL,
-            identifier: dto.email,
-            token_hash,
-            expires_at: expiresAt,
-          },
-          tx,
-        )
+        await repo.createVerificationToken({
+          userId: user.id,
+          type: VERIFICATION_TYPE.EMAIL_CONFIRM,
+          channel: VERIFICATION_CHANNEL.EMAIL,
+          identifier: dto.email,
+          tokenHash,
+          expiresAt,
+        })
 
-        await audit.record({ user_id: user.id, event: AUDIT_EVENT.ACCOUNT_CREATED }, tx)
+        await audit.record({ userId: user.id, event: AUDIT_EVENT.ACCOUNT_CREATED })
 
         // Письмо — внешний side-effect: кладём задание в ТУ ЖЕ транзакцию,
         // отправит воркер уже после коммита (см. outbox.worker).
-        await outbox.enqueue(
-          {
-            topic: 'email.verification',
-            payload: { email: dto.email, otp: code, expires_at: expiresAt },
-          },
-          tx,
-        )
+        await outbox.enqueue({
+          topic: 'email.verification',
+          payload: { email: dto.email, otp: code, expiresAt },
+        })
       })
     },
 
@@ -100,12 +95,12 @@ export const authService = (deps: AuthServiceDeps): IAuthService => {
         throw new NotFoundError('Not found user', 'NOT_FOUND')
       }
       if (user.status === 'banned') {
-        const reason = user.banned_reason && user.banned_at ? user.banned_reason : 'User banned'
+        const reason = user.bannedReason && user.bannedAt ? user.bannedReason : 'User banned'
         throw new ConflictError(reason, 'USER_BANNED')
       }
 
       // 4. Пароль.
-      const ok = await hash.verify(dto.password, user.password_hash)
+      const ok = await hash.verify(dto.password, user.passwordHash)
       if (!ok) {
         await loginAttempts.record(dto.email, ip, false)
         throw new UnauthorizedError('Invalid credentials', 'INVALID_CREDENTIALS')
@@ -120,18 +115,20 @@ export const authService = (deps: AuthServiceDeps): IAuthService => {
           kind: 'two_factor_required',
           userId: user.id,
           email: user.email,
-          tokenVersion: user.token_version,
+          tokenVersion: user.tokenVersion,
         }
       }
 
       // 6. Полный логин атомарно: сессия (refresh) + login_attempt + audit.
-      return await runTx(async (tx: Executor) => {
-        const issued = await session.issue(
-          { userId: user.id, tokenVersion: user.token_version, ip, userAgent },
-          tx,
-        )
-        await loginAttempts.record(dto.email, ip, true, tx)
-        await audit.record({ user_id: user.id, event: AUDIT_EVENT.LOGIN_SUCCESS }, tx)
+      return await runTx(async () => {
+        const issued = await session.issue({
+          userId: user.id,
+          tokenVersion: user.tokenVersion,
+          ip,
+          userAgent,
+        })
+        await loginAttempts.record(dto.email, ip, true)
+        await audit.record({ userId: user.id, event: AUDIT_EVENT.LOGIN_SUCCESS })
 
         return {
           kind: 'authenticated',
@@ -152,14 +149,16 @@ export const authService = (deps: AuthServiceDeps): IAuthService => {
       try {
         // Проверка 2FA-кода и выпуск сессии — атомарно (списание recovery-кода
         // откатится вместе с сессией при сбое).
-        return await runTx(async (tx: Executor) => {
-          await twoFactor.verifyForLogin(input.userId, code, tx)
-          const issued = await session.issue(
-            { userId: input.userId, tokenVersion: input.tokenVersion, ip, userAgent },
-            tx,
-          )
-          await loginAttempts.record(input.email, ip, true, tx)
-          await audit.record({ user_id: input.userId, event: AUDIT_EVENT.LOGIN_SUCCESS }, tx)
+        return await runTx(async () => {
+          await twoFactor.verifyForLogin(input.userId, code)
+          const issued = await session.issue({
+            userId: input.userId,
+            tokenVersion: input.tokenVersion,
+            ip,
+            userAgent,
+          })
+          await loginAttempts.record(input.email, ip, true)
+          await audit.record({ userId: input.userId, event: AUDIT_EVENT.LOGIN_SUCCESS })
 
           return {
             identity: { id: input.userId, email: input.email },

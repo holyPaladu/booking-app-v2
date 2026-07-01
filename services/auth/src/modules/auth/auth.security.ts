@@ -1,38 +1,6 @@
 import { cfg } from 'src/config'
 
-// Адаптеры безопасности auth-флоу: пароль (argon2id) и OTP (короткий SHA-256).
-
-export type IHashService = {
-  hash: (value: string) => Promise<string>
-  verify: (value: string, hash: string) => Promise<boolean>
-}
-
-// OTP хэшируем быстрым SHA-256, НЕ argon2: код короткоживущий и сверяется по равенству.
-export type IOtpService = {
-  generate: () => string
-  hash: (otp: string) => string
-  verify: (otp: string, hash: string) => boolean
-}
-
-// Refresh-токен: непрозрачная случайная строка; в БД (sessions) хранится только её
-// SHA-256-хэш. Сравнение при ротации — по равенству хэшей.
-export type IRefreshTokenService = {
-  generate: () => string
-  hash: (token: string) => string
-}
-
-export const hashService = (): IHashService => {
-  const hashConfig = {
-    algorithm: 'argon2id',
-    memoryCost: cfg.getNumber('argon_memory'),
-    timeCost: cfg.getNumber('argon_time_cost'),
-  } as const
-
-  return {
-    hash: (value) => Bun.password.hash(value, hashConfig),
-    verify: (value, hash) => Bun.password.verify(value, hash),
-  }
-}
+// ====== HELPERS ======
 
 // SHA-256 → hex через Bun-native хэшер (как Bun.password выше, без node:crypto).
 const sha256 = (value: string) => new Bun.CryptoHasher('sha256').update(value).digest('hex')
@@ -50,6 +18,34 @@ const randomOtp = () => {
   return (n % 1_000_000).toString().padStart(6, '0')
 }
 
+// ====== SERVICES ======
+
+// Адаптеры безопасности auth-флоу: пароль (argon2id) и OTP (короткий SHA-256).
+export type IHashService = {
+  hash: (value: string) => Promise<string>
+  verify: (value: string, hash: string) => Promise<boolean>
+}
+
+export const hashService = (): IHashService => {
+  const hashConfig = {
+    algorithm: 'argon2id',
+    memoryCost: cfg.getNumber('argon_memory'),
+    timeCost: cfg.getNumber('argon_time_cost'),
+  } as const
+
+  return {
+    hash: (value) => Bun.password.hash(value, hashConfig),
+    verify: (value, hash) => Bun.password.verify(value, hash),
+  }
+}
+
+// OTP хэшируем быстрым SHA-256, НЕ argon2: код короткоживущий и сверяется по равенству.
+export type IOtpService = {
+  generate: () => string
+  hash: (otp: string) => string
+  verify: (otp: string, hash: string) => boolean
+}
+
 export const otpService = (): IOtpService => ({
   generate: randomOtp,
   hash: (otp) => sha256(otp),
@@ -62,6 +58,13 @@ export const otpService = (): IOtpService => ({
     return diff === 0
   },
 })
+
+// Refresh-токен: непрозрачная случайная строка; в БД (sessions) хранится только её
+// SHA-256-хэш. Сравнение при ротации — по равенству хэшей.
+export type IRefreshTokenService = {
+  generate: () => string
+  hash: (token: string) => string
+}
 
 export const refreshTokenService = (): IRefreshTokenService => ({
   // 32 байта энтропии → hex. crypto.getRandomValues — Web Crypto глобал в Bun

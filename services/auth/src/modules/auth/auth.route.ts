@@ -2,8 +2,7 @@ import { UnauthorizedError, type createConfigService, type responseMapper } from
 import { jwt } from '@elysiajs/jwt'
 import { CHALLENGE_SCOPE } from '@modules/two-factor/two-factor.const'
 import { Elysia } from 'elysia'
-import { authModels } from './auth.model'
-import type { IAuthService } from './auth.port'
+import { type IAuthService, authModels } from './auth.port'
 
 type RouteDeps = {
   response: ReturnType<typeof responseMapper>

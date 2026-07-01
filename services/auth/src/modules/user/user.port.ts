@@ -1,25 +1,32 @@
-import type { Executor } from '@lib/tx'
+import { t } from 'elysia'
 import type { UserCredentials, UserView } from './user.entity'
+
+// Контракт входа HTTP-слоя: Elysia-модели валидации живут рядом с портом модуля.
+export const userModels = {
+  'user.get-by-id': t.Object({
+    id: t.String({ format: 'uuid' }),
+  }),
+}
 
 // Внутренний вход repo.create — пароль уже захэширован сервисом-потребителем.
 export type CreateUserInput = {
   email: string
   phone?: string | null
-  password_hash: string
+  passwordHash: string
 }
 
-// Порт репозитория: контракт SQL-слоя (для моков в тестах).
-// `exec` позволяет вызвать метод внутри общей транзакции (см. @lib/tx).
+// Порт репозитория: контракт SQL-слоя (для моков в тестах). Транзакционность —
+// через ambient-контекст (@lib/tx), в сигнатурах не отражается.
 export type IUserRepo = {
-  create: (input: CreateUserInput, exec?: Executor) => Promise<UserView>
-  findByEmail: (email: string, exec?: Executor) => Promise<UserCredentials | undefined>
-  findByPhone: (phone: string, exec?: Executor) => Promise<UserView | undefined>
-  findById: (id: string, exec?: Executor) => Promise<UserView | undefined>
+  create: (input: CreateUserInput) => Promise<UserView>
+  findByEmail: (email: string) => Promise<UserCredentials | undefined>
+  findByPhone: (phone: string) => Promise<UserView | undefined>
+  findById: (id: string) => Promise<UserView | undefined>
 }
 
 // Публичная поверхность модуля — другие модули (например auth) зависят ТОЛЬКО от неё.
 export type IUserService = {
-  create: (input: CreateUserInput, exec?: Executor) => Promise<UserView>
+  create: (input: CreateUserInput) => Promise<UserView>
   getByEmail: (email: string) => Promise<UserCredentials | undefined>
   getByPhone: (phone: string) => Promise<UserView | undefined>
   getById: (id: string) => Promise<UserView | undefined>

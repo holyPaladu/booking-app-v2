@@ -1,46 +1,47 @@
 export type UserStatus = 'active' | 'banned' | 'deleted'
 
-// Доменная сущность user. Имена полей совпадают с колонками миграции 001_create_users.
+// Доменная сущность user. Поля — camelCase; маппинг в колонки БД (snake_case)
+// делает user.repo (алиасы `AS "camelCase"` в SELECT). Выше repo snake_case нет.
 export interface UserEntity {
   id: string
 
   email: string
-  email_verified: boolean
+  emailVerified: boolean
 
   phone: string | null
-  phone_verified: boolean
+  phoneVerified: boolean
 
-  password_hash: string
+  passwordHash: string
 
   status: UserStatus
 
-  banned_reason: string | null
-  banned_at: Date | null
-  banned_by: string | null
+  bannedReason: string | null
+  bannedAt: Date | null
+  bannedBy: string | null
 
-  token_version: number
+  tokenVersion: number
 
-  deleted_at: Date | null
-  deleted_by: string | null
+  deletedAt: Date | null
+  deletedBy: string | null
 
-  created_at: Date
-  updated_at: Date
+  createdAt: Date
+  updatedAt: Date
 }
 
 // То, что отдаём наружу (без чувствительных полей).
 export type UserView = Pick<UserEntity, 'id' | 'email' | 'status'>
 
-// Для auth-флоу (login) нужен хэш пароля и token_version (для refresh-сессии) —
+// Для auth-флоу (login) нужен хэш пароля и tokenVersion (для refresh-сессии) —
 // отдаём отдельным типом, не наружу.
 export type UserCredentials = Pick<
   UserEntity,
   | 'id'
   | 'email'
-  | 'password_hash'
-  | 'email_verified'
+  | 'passwordHash'
+  | 'emailVerified'
   | 'status'
-  | 'banned_at'
-  | 'banned_by'
-  | 'banned_reason'
-  | 'token_version'
+  | 'bannedAt'
+  | 'bannedBy'
+  | 'bannedReason'
+  | 'tokenVersion'
 >

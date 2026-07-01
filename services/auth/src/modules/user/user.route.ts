@@ -1,7 +1,6 @@
 import type { createConfigService, responseMapper } from '@booking/shared'
 import { Elysia } from 'elysia'
-import { userModels } from './user.model'
-import type { IUserService } from './user.port'
+import { type IUserService, userModels } from './user.port'
 
 type RouteDeps = {
   response: ReturnType<typeof responseMapper>

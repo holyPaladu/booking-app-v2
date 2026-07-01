@@ -5,8 +5,7 @@
     "baseUrl": ".",
     "paths": {
       "@modules/*": ["src/modules/*"],
-      "@lib/*": ["src/lib/*"],
-      "@schema/*": ["src/schema/*"]
+      "@lib/*": ["src/lib/*"]
     }
   },
   "include": ["src", "test"]

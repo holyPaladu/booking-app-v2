@@ -1,53 +1,53 @@
 import { describe, expect, it } from 'bun:test'
 import { UnauthorizedError, createConfigService, mapError, responseMapper } from '@booking/shared'
 import { Elysia } from 'elysia'
-import type { Executor, TxRunner } from '../src/lib/tx'
-import type { IAuditService } from '../src/modules/audit/audit.port'
+import type { TxRunner } from '../src/lib/tx'
+import type { IAuditService } from '../src/modules/audit'
 import type { IAuthRepo } from '../src/modules/auth/auth.port'
 import { authRouteV1 } from '../src/modules/auth/auth.route'
 import type { IHashService, IOtpService } from '../src/modules/auth/auth.security'
 import { authService } from '../src/modules/auth/auth.service'
-import type { ILoginAttemptService } from '../src/modules/login-attempt/login-attempt.port'
-import type { IOutboxService, OutboxJob } from '../src/modules/outbox/outbox.port'
-import type { ISessionService } from '../src/modules/session/session.port'
+import type { ILoginAttemptService } from '../src/modules/login-attempt'
+import type { IOutboxService, OutboxJob } from '../src/modules/outbox'
+import type { ISessionService } from '../src/modules/session'
 import type { ITwoFactorService } from '../src/modules/two-factor/two-factor.port'
 import type { IUserService } from '../src/modules/user/user.port'
 
 // E2E через app.handle() с in-memory фейками всех портов — без Postgres.
-// runTx — pass-through: фейк-repo игнорируют executor, поэтому транзакция фиктивна.
+// runTx — pass-through: транзакция фиктивна, фейки просто исполняют work().
 function buildApp() {
   const rows: {
     id: string
     email: string
-    email_verified: boolean
+    emailVerified: boolean
     phone: string | null
-    password_hash: string
+    passwordHash: string
     status: 'active'
-    banned_reason: string | null
-    banned_at: Date | null
-    banned_by: string | null
-    token_version: number
+    bannedReason: string | null
+    bannedAt: Date | null
+    bannedBy: string | null
+    tokenVersion: number
   }[] = []
   const granted: string[] = []
-  const verifications: { user_id: string; token_hash: string }[] = []
+  const verifications: { userId: string; tokenHash: string }[] = []
   const enqueued: OutboxJob[] = []
   const audited: string[] = []
   const sessionsCreated: { userId: string; refreshToken: string }[] = []
   const twoFaUsers = new Set<string>() // user_id с включённой 2FA
 
   const users: IUserService = {
-    create: async ({ email, phone, password_hash }) => {
+    create: async ({ email, phone, passwordHash }) => {
       const u = {
         id: crypto.randomUUID(),
         email,
-        email_verified: false,
+        emailVerified: false,
         phone: phone ?? null,
-        password_hash,
+        passwordHash,
         status: 'active' as const,
-        banned_reason: null,
-        banned_at: null,
-        banned_by: null,
-        token_version: 0,
+        bannedReason: null,
+        bannedAt: null,
+        bannedBy: null,
+        tokenVersion: 0,
       }
       rows.push(u)
       return { id: u.id, email: u.email, status: u.status }
@@ -72,7 +72,7 @@ function buildApp() {
   const repo: IAuthRepo = {
     grantDefaultRole: async (userId) => void granted.push(userId),
     createVerificationToken: async (input) =>
-      void verifications.push({ user_id: input.user_id, token_hash: input.token_hash }),
+      void verifications.push({ userId: input.userId, tokenHash: input.tokenHash }),
   }
   // 2FA-модуль через service-порт: гейт по twoFaUsers, фиктивный код '654321'.
   const twoFactor: ITwoFactorService = {
@@ -111,7 +111,7 @@ function buildApp() {
     hash: (code) => `oh:${code}`,
     verify: (code, h) => h === `oh:${code}`,
   }
-  const runTx: TxRunner = (work) => work(undefined as unknown as Executor)
+  const runTx: TxRunner = (work) => work()
 
   const svc = authService({
     users,
@@ -170,7 +170,7 @@ describe('auth e2e (in-memory ports)', () => {
     expect(state.rows).toHaveLength(1)
     expect(state.granted).toEqual([state.rows[0].id])
     expect(state.verifications).toHaveLength(1)
-    expect(state.verifications[0].token_hash).toBe('oh:123456')
+    expect(state.verifications[0].tokenHash).toBe('oh:123456')
     expect(state.audited).toContain('account_created')
     expect(state.enqueued).toHaveLength(1)
     expect(state.enqueued[0].topic).toBe('email.verification')

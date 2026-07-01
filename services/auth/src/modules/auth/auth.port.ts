@@ -1,5 +1,27 @@
-import type { Executor } from '@lib/tx'
-import type { AuthLoginRequest, AuthRegisterRequest } from './auth.model'
+import { t } from 'elysia'
+
+// Контракт входа HTTP-слоя: Elysia-модели валидации + выводимые из них типы запросов
+// (single source of truth — типы не дублируем интерфейсами). Живут рядом с портом.
+export const authModels = {
+  'auth.register': t.Object({
+    email: t.String({ format: 'email' }),
+    password: t.String({ minLength: 6 }),
+    phone: t.Optional(t.String({ pattern: '^\\+[1-9]\\d{6,14}$' })),
+  }),
+  'auth.login': t.Object({
+    email: t.String({ format: 'email' }),
+    password: t.String({ minLength: 6 }),
+  }),
+  // Шаг-2 логина: challenge-токен из шага-1 + TOTP/recovery-код.
+  'auth.login-2fa': t.Object({
+    challenge_token: t.String(),
+    code: t.String({ minLength: 6 }),
+  }),
+}
+
+export type AuthRegisterRequest = (typeof authModels)['auth.register']['static']
+export type AuthLoginRequest = (typeof authModels)['auth.login']['static']
+export type AuthLogin2faRequest = (typeof authModels)['auth.login-2fa']['static']
 
 // Что login отдаёт роуту для подписи JWT.
 export type AuthIdentity = { id: string; email: string }
@@ -37,18 +59,18 @@ export type IAuthService = {
 
 // Вход создания токена верификации. token_hash — хэш OTP (сам OTP в БД не лежит).
 export type CreateVerificationInput = {
-  user_id: string
+  userId: string
   type: string
   channel: string
   identifier: string
-  token_hash: string
-  expires_at: string // ISO timestamp
+  tokenHash: string
+  expiresAt: string // ISO timestamp
 }
 
 // Контракт SQL-слоя auth-флоу: побочные записи регистрации с одним писателем
 // (роль, токен верификации). Пользователи — через IUserService, аудит — через
 // IAuditService, письмо — через IOutboxService (каждая таблица — свой владелец).
 export type IAuthRepo = {
-  grantDefaultRole: (userId: string, exec?: Executor) => Promise<void>
-  createVerificationToken: (input: CreateVerificationInput, exec?: Executor) => Promise<void>
+  grantDefaultRole: (userId: string) => Promise<void>
+  createVerificationToken: (input: CreateVerificationInput) => Promise<void>
 }

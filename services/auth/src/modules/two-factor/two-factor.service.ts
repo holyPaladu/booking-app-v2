@@ -1,6 +1,6 @@
 import { BadRequestError, ConflictError, UnauthorizedError } from '@booking/shared'
-import type { Executor, TxRunner } from '@lib/tx'
-import type { IAuditService } from '@modules/audit/audit.port'
+import type { TxRunner } from '@lib/tx'
+import type { IAuditService } from '@modules/audit'
 import { TWO_FACTOR_AUDIT } from './two-factor.const'
 import type { ITwoFactorRepo, ITwoFactorService } from './two-factor.port'
 import type { ITwoFactorSecurity } from './two-factor.security'
@@ -23,15 +23,15 @@ export const twoFactorService = (deps: TwoFactorServiceDeps): ITwoFactorService 
   }
 
   // Генерим N recovery-кодов, кладём в БД только их хэши, возвращаем открытый текст
-  // (показывается пользователю один раз).
-  const issueRecoveryCodes = async (userId: string, tx: Executor) => {
+  // (показывается пользователю один раз). Вызывается внутри runTx — tx ambient.
+  const issueRecoveryCodes = async (userId: string) => {
     const recovery_codes = security.generateRecoveryCodes()
-    await repo.insertRecoveryCodes(userId, recovery_codes.map(security.hashRecoveryCode), tx)
+    await repo.insertRecoveryCodes(userId, recovery_codes.map(security.hashRecoveryCode))
     return recovery_codes
   }
 
   return {
-    isEnabled: (userId, exec) => repo.isEnabled(userId, exec),
+    isEnabled: (userId) => repo.isEnabled(userId),
 
     setup: async (userId, email) => {
       if (await repo.isEnabled(userId))
@@ -48,52 +48,52 @@ export const twoFactorService = (deps: TwoFactorServiceDeps): ITwoFactorService 
       if (row.enabled)
         throw new BadRequestError('Two-factor already enabled', '2FA_ALREADY_ENABLED')
 
-      const secret = await security.decryptSecret(row.secret_enc)
+      const secret = await security.decryptSecret(row.secretEnc)
       if (!(await security.verifyTotp(secret, code)))
         throw new BadRequestError('Invalid code', 'INVALID_OTP')
 
-      return await runTx(async (tx) => {
-        await repo.enable(userId, tx)
-        const recovery_codes = await issueRecoveryCodes(userId, tx)
-        await audit.record({ user_id: userId, event: TWO_FACTOR_AUDIT.ENABLED }, tx)
+      return await runTx(async () => {
+        await repo.enable(userId)
+        const recovery_codes = await issueRecoveryCodes(userId)
+        await audit.record({ userId, event: TWO_FACTOR_AUDIT.ENABLED })
         return { recovery_codes }
       })
     },
 
     disable: async (userId, code) => {
       const row = await requireEnabledSecret(userId)
-      if (!(await security.verifyTotp(await security.decryptSecret(row.secret_enc), code)))
+      if (!(await security.verifyTotp(await security.decryptSecret(row.secretEnc), code)))
         throw new BadRequestError('Invalid code', 'INVALID_OTP')
 
-      await runTx(async (tx) => {
-        await repo.deleteRecoveryCodes(userId, tx)
-        await repo.deleteSecret(userId, tx)
-        await audit.record({ user_id: userId, event: TWO_FACTOR_AUDIT.DISABLED }, tx)
+      await runTx(async () => {
+        await repo.deleteRecoveryCodes(userId)
+        await repo.deleteSecret(userId)
+        await audit.record({ userId, event: TWO_FACTOR_AUDIT.DISABLED })
       })
     },
 
     regenerateRecoveryCodes: async (userId, code) => {
       const row = await requireEnabledSecret(userId)
-      if (!(await security.verifyTotp(await security.decryptSecret(row.secret_enc), code)))
+      if (!(await security.verifyTotp(await security.decryptSecret(row.secretEnc), code)))
         throw new BadRequestError('Invalid code', 'INVALID_OTP')
 
-      return await runTx(async (tx) => {
-        await repo.deleteRecoveryCodes(userId, tx)
-        return { recovery_codes: await issueRecoveryCodes(userId, tx) }
+      return await runTx(async () => {
+        await repo.deleteRecoveryCodes(userId)
+        return { recovery_codes: await issueRecoveryCodes(userId) }
       })
     },
 
-    verifyForLogin: async (userId, code, exec) => {
-      const row = await repo.getSecret(userId, exec)
+    verifyForLogin: async (userId, code) => {
+      const row = await repo.getSecret(userId)
       if (!row || !row.enabled) throw new UnauthorizedError('Two-factor not enabled', 'INVALID_2FA')
 
       // Основной путь — TOTP.
-      if (await security.verifyTotp(await security.decryptSecret(row.secret_enc), code)) return
+      if (await security.verifyTotp(await security.decryptSecret(row.secretEnc), code)) return
 
       // Запасной путь — одноразовый recovery-код: списываем при совпадении.
-      const found = await repo.findUnusedRecoveryCode(userId, security.hashRecoveryCode(code), exec)
+      const found = await repo.findUnusedRecoveryCode(userId, security.hashRecoveryCode(code))
       if (found) {
-        await repo.markRecoveryCodeUsed(found.id, exec)
+        await repo.markRecoveryCodeUsed(found.id)
         return
       }
       throw new UnauthorizedError('Invalid 2FA code', 'INVALID_2FA')

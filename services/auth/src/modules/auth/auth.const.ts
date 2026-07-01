@@ -1,5 +1,5 @@
 // Живые константы auth-флоу (enum-значения миграций). Незадействованные наборы
-// (ROLES, USER_STATUS, PERMISSIONS) лежат в src/schema до реализации модулей.
+// (ROLES, USER_STATUS, PERMISSIONS) лежат в ../../reference до реализации модулей.
 
 export const AUDIT_EVENT = {
   ACCOUNT_CREATED: 'account_created',

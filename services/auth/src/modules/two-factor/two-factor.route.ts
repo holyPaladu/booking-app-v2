@@ -1,7 +1,6 @@
 import { authMacro, type createConfigService, type responseMapper } from '@booking/shared'
 import { Elysia } from 'elysia'
-import { twoFactorModels } from './two-factor.model'
-import type { ITwoFactorService } from './two-factor.port'
+import { type ITwoFactorService, twoFactorModels } from './two-factor.port'
 
 type RouteDeps = {
   response: ReturnType<typeof responseMapper>

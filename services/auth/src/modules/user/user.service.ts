@@ -3,7 +3,7 @@ import type { IUserRepo, IUserService } from './user.port'
 
 export const userService = (repo: IUserRepo): IUserService => {
   return {
-    create: (input, exec) => repo.create(input, exec),
+    create: (input) => repo.create(input),
 
     getByEmail: (email) => repo.findByEmail(email),
     getByPhone: (phone) => repo.findByPhone(phone),

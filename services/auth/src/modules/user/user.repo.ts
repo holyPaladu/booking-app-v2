@@ -1,34 +1,45 @@
-import type { SqlClient } from '@booking/shared'
+import type { Db } from '@lib/tx'
 import type { UserCredentials, UserView } from './user.entity'
 import type { IUserRepo } from './user.port'
 
-export const userRepo = (sql: SqlClient): IUserRepo => ({
-  create: async (input, exec = sql) => {
-    const [row] = await exec<UserView[]>`
+export const userRepo = (db: Db): IUserRepo => ({
+  create: async (input) => {
+    const sql = db()
+    const [row] = await sql<UserView[]>`
       INSERT INTO users (email, phone, password_hash)
-      VALUES (${input.email}, ${input.phone ?? null}, ${input.password_hash})
+      VALUES (${input.email}, ${input.phone ?? null}, ${input.passwordHash})
       RETURNING id, email, status
     `
     return row
   },
-  findByEmail: async (email, exec = sql) => {
-    const [row] = await exec<UserCredentials[]>`
-      SELECT id, email, password_hash, email_verified, status, banned_at, banned_by, banned_reason, token_version
+  findByEmail: async (email) => {
+    const sql = db()
+    const [row] = await sql<UserCredentials[]>`
+      SELECT id, email,
+             password_hash  AS "passwordHash",
+             email_verified AS "emailVerified",
+             status,
+             banned_at      AS "bannedAt",
+             banned_by      AS "bannedBy",
+             banned_reason  AS "bannedReason",
+             token_version  AS "tokenVersion"
       FROM users
       WHERE email = ${email} AND deleted_at IS NULL
     `
     return row
   },
-  findByPhone: async (phone, exec = sql) => {
-    const [row] = await exec<UserView[]>`
+  findByPhone: async (phone) => {
+    const sql = db()
+    const [row] = await sql<UserView[]>`
       SELECT id, email, status
       FROM users
       WHERE phone = ${phone} AND deleted_at IS NULL
     `
     return row
   },
-  findById: async (id, exec = sql) => {
-    const [row] = await exec<UserView[]>`
+  findById: async (id) => {
+    const sql = db()
+    const [row] = await sql<UserView[]>`
       SELECT id, email, status
       FROM users
       WHERE id = ${id} AND deleted_at IS NULL

@@ -1,27 +1,29 @@
-import type { SqlClient } from '@booking/shared'
+import type { Db } from '@lib/tx'
 import type { IAuthRepo } from './auth.port'
 
-// SQL побочных записей регистрации. Каждый метод принимает exec — чтобы выполниться
-// внутри общей транзакции auth.service (см. @lib/tx).
-export const authRepo = (sql: SqlClient): IAuthRepo => ({
-  grantDefaultRole: async (userId, exec = sql) => {
-    await exec`
+// SQL побочных записей регистрации. Executor берётся из ambient-контекста (@lib/tx):
+// внутри runTx это активный tx, вне — базовый пул.
+export const authRepo = (db: Db): IAuthRepo => ({
+  grantDefaultRole: async (userId) => {
+    const sql = db()
+    await sql`
       INSERT INTO user_roles (user_id, role_id)
       SELECT ${userId}, id FROM roles WHERE is_default = TRUE
       ON CONFLICT (user_id, role_id) DO NOTHING
     `
   },
 
-  createVerificationToken: async (input, exec = sql) => {
-    await exec`
+  createVerificationToken: async (input) => {
+    const sql = db()
+    await sql`
       INSERT INTO verification_tokens (user_id, type, channel, identifier, token_hash, expires_at)
       VALUES (
-        ${input.user_id},
+        ${input.userId},
         ${input.type}::verification_type,
         ${input.channel}::verification_channel,
         ${input.identifier},
-        ${input.token_hash},
-        ${input.expires_at}
+        ${input.tokenHash},
+        ${input.expiresAt}
       )
     `
   },
