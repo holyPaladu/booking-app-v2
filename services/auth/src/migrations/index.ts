@@ -149,8 +149,8 @@ const MIGRATIONS: Migration[] = [
             user_agent         TEXT,
             ip_address         INET,
             device_name        VARCHAR(100),
+            used               BOOLEAN     NOT NULL DEFAULT FALSE,
             expires_at         TIMESTAMPTZ NOT NULL,
-            last_used_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
             created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
             CONSTRAINT sessions_token_hash_unique UNIQUE (refresh_token_hash)

@@ -8,6 +8,7 @@ export const userService = (repo: IUserRepo): IUserService => {
     getByEmail: (email) => repo.findByEmail(email),
     getByPhone: (phone) => repo.findByPhone(phone),
     getById: (id) => repo.findById(id),
+    getCredentialsById: (id) => repo.findCredentialsById(id),
 
     findById: async (id) => {
       const user = await repo.findById(id)

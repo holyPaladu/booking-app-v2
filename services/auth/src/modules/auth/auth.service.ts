@@ -172,5 +172,45 @@ export const authService = (deps: AuthServiceDeps): IAuthService => {
         throw err
       }
     },
+
+    rotateToken: async (refreshToken, ctx) => {
+      const current = await session.findSession(refreshToken)
+      if (!current) throw new UnauthorizedError('Invalid refresh token', 'INVALID_TOKEN')
+
+      // Повторное предъявление уже ротированного (used) токена — признак кражи:
+      // гасим всю «семью» сессий этого юзера с этой версией и отклоняем. Делаем это
+      // ВНЕ runTx ниже, чтобы отзыв сохранился несмотря на брошенную ошибку.
+      if (current.used) {
+        await session.revokeAllByUserIdAndTokenVersion(current.userId, current.tokenVersion)
+        throw new UnauthorizedError('Refresh token reuse detected', 'TOKEN_REUSED')
+      }
+
+      if (current.expiresAt.getTime() <= Date.now())
+        throw new UnauthorizedError('Refresh token expired', 'TOKEN_EXPIRED')
+
+      // token_version юзера вырос (logout-all / ban / смена пароля) → сессия отозвана.
+      const user = await users.getCredentialsById(current.userId)
+      if (!user || user.tokenVersion !== current.tokenVersion)
+        throw new UnauthorizedError('Session revoked', 'SESSION_REVOKED')
+
+      // Ротация атомарно: старый токен → tombstone (used, для reuse-детекции),
+      // выпуск новой сессии, аудит. Access-JWT подпишет роут из вернувшегося identity.
+      return await runTx(async () => {
+        await session.markUsed(current.id)
+        const issued = await session.issue({
+          userId: user.id,
+          tokenVersion: user.tokenVersion,
+          ip: ctx.ip,
+          userAgent: ctx.userAgent,
+        })
+        await audit.record({ userId: user.id, event: AUDIT_EVENT.TOKEN_REFRESHED })
+
+        return {
+          identity: { id: user.id, email: user.email },
+          refreshToken: issued.refreshToken,
+          refreshExpiresAt: issued.expiresAt,
+        }
+      })
+    },
   }
 }

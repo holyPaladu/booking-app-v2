@@ -46,4 +46,22 @@ export const userRepo = (db: Db): IUserRepo => ({
     `
     return row
   },
+  // Кредненшелы по id для auth-флоу (ротация refresh — нужна token_version). Зеркало
+  // findByEmail; наружу не отдаётся (в отличие от findById → UserView).
+  findCredentialsById: async (id) => {
+    const sql = db()
+    const [row] = await sql<UserCredentials[]>`
+      SELECT id, email,
+             password_hash  AS "passwordHash",
+             email_verified AS "emailVerified",
+             status,
+             banned_at      AS "bannedAt",
+             banned_by      AS "bannedBy",
+             banned_reason  AS "bannedReason",
+             token_version  AS "tokenVersion"
+      FROM users
+      WHERE id = ${id} AND deleted_at IS NULL
+    `
+    return row
+  },
 })

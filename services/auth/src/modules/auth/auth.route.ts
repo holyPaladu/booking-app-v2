@@ -104,3 +104,24 @@ export const authRouteV1 = (svc: IAuthService, deps: RouteDeps) =>
       },
       { body: 'auth.login-2fa' },
     )
+
+    .post(
+      '/refresh',
+      async ({ body, jwt, server, request }) => {
+        const ip = server?.requestIP(request)?.address ?? null
+        const userAgent = request.headers.get('user-agent') ?? null
+
+        const result = await svc.rotateToken(body.refresh_token, { ip, userAgent })
+
+        const access_token = await jwt.sign({
+          sub: result.identity.id,
+          email: result.identity.email,
+        })
+        return deps.response.success('Token rotated', {
+          access_token,
+          refresh_token: result.refreshToken,
+          token_type: 'Bearer',
+        })
+      },
+      { body: 'auth.refresh' },
+    )

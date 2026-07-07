@@ -61,6 +61,7 @@ function buildApp() {
       const u = rows.find((r) => r.id === id)
       return u && { id: u.id, email: u.email, status: u.status }
     },
+    getCredentialsById: async (id) => rows.find((r) => r.id === id),
     findById: async (id) => {
       const u = rows.find((r) => r.id === id)
       if (!u) throw new Error('not found')
@@ -100,6 +101,9 @@ function buildApp() {
         expiresAt: new Date(Date.now() + 1000),
       }
     },
+    findSession: async () => undefined,
+    markUsed: async () => {},
+    revokeAllByUserIdAndTokenVersion: async () => {},
   }
   const outbox: IOutboxService = { enqueue: async (job) => void enqueued.push(job) }
   const hash: IHashService = {

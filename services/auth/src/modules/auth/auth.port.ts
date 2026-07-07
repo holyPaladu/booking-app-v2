@@ -17,12 +17,18 @@ export const authModels = {
     challenge_token: t.String(),
     code: t.String({ minLength: 6 }),
   }),
+
+  // HTTP-контракт снаружи — snake_case (как refresh_token в ответе /login).
+  'auth.refresh': t.Object({
+    refresh_token: t.String(),
+  }),
 }
 
 export type AuthRegisterRequest = (typeof authModels)['auth.register']['static']
 export type AuthLoginRequest = (typeof authModels)['auth.login']['static']
 export type AuthLogin2faRequest = (typeof authModels)['auth.login-2fa']['static']
 
+// ================== PORTS ================
 // Что login отдаёт роуту для подписи JWT.
 export type AuthIdentity = { id: string; email: string }
 
@@ -55,6 +61,10 @@ export type IAuthService = {
     code: string,
     ctx: LoginContext,
   ) => Promise<AuthenticatedResult>
+
+  // Ротация refresh: отдаёт identity + новый refresh (access-JWT подписывает роут,
+  // как в /login). ctx — для записи ip/user-agent в новую сессию.
+  rotateToken: (refreshToken: string, ctx: LoginContext) => Promise<AuthenticatedResult>
 }
 
 // Вход создания токена верификации. token_hash — хэш OTP (сам OTP в БД не лежит).
