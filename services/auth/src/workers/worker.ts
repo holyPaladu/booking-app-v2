@@ -1,6 +1,6 @@
 import type { createConfigService } from '@booking/shared'
 import { startOutboxWorker } from '@modules/outbox'
-import type { Container } from './container'
+import type { Container } from '../core/container'
 
 type Cfg = ReturnType<typeof createConfigService>
 

@@ -1,4 +1,4 @@
-import { cfg } from 'src/config'
+import { cfg } from 'src/core/config'
 
 // ====== HELPERS ======
 

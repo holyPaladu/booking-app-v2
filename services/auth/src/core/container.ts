@@ -52,9 +52,13 @@ export function buildContainer(sql: SqlClient, cfg: Cfg): Container {
   const users = userService(userRepo(db))
   const audit = auditService(auditRepo(db))
   const loginAttempts = loginAttemptService(loginAttemptRepo(db))
-  const sessions = sessionService(refreshTokenService(), sessionRepo(db), {
-    ttlDays: cfg.getNumber('refresh_ttl_days'),
-  })
+  const sessions = sessionService(
+    refreshTokenService(),
+    sessionRepo(db),
+    {
+      ttlDays: cfg.getNumber('refresh_ttl_days'),
+    }
+  )
   const outboxRepository = outboxRepo(db)
   const outbox = outboxService(outboxRepository)
   const notifier = logNotifier()
