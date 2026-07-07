@@ -1,4 +1,4 @@
-import { UnauthorizedError, type createConfigService, type responseMapper } from '@booking/shared'
+import { authMacro, UnauthorizedError, type createConfigService, type responseMapper } from '@booking/shared'
 import { jwt } from '@elysiajs/jwt'
 import { CHALLENGE_SCOPE } from '@modules/two-factor/two-factor.const'
 import { Elysia } from 'elysia'
@@ -12,11 +12,10 @@ type RouteDeps = {
 export const authRouteV1 = (svc: IAuthService, deps: RouteDeps) =>
   new Elysia({ prefix: 'auth', tags: ['auth'] })
     .use(
-      jwt({
-        name: 'jwt',
-        secret: deps.cfg.get('jwt_secret'),
-        exp: deps.cfg.get('jwt_expiry'),
-      }),
+      authMacro(
+        deps.cfg.get('jwt_secret'),
+        deps.cfg.get('jwt_expiry'),
+      )
     )
     // Отдельный инстанс для короткого 2FA-challenge: тот же секрет, свой exp.
     .use(
@@ -124,4 +123,17 @@ export const authRouteV1 = (svc: IAuthService, deps: RouteDeps) =>
         })
       },
       { body: 'auth.refresh' },
+    )
+
+    .post(
+      '/logout',
+      async ({ body, currentUser }) => {
+        await svc.revokeToken({
+          refreshToken: body.refresh_token,
+          userId: currentUser.id,
+          email: currentUser.email,
+        })
+        return deps.response.success('Logged out')
+      },
+      { body: 'auth.logout', auth: true }
     )

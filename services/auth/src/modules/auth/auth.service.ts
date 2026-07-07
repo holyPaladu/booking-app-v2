@@ -212,5 +212,23 @@ export const authService = (deps: AuthServiceDeps): IAuthService => {
         }
       })
     },
+
+    revokeToken: async (dto) => {
+      // Идемпотентный logout: находим сессию по предъявленному refresh-токену.
+      // Нет такой (уже отозвана/ротирована) — считаем разлогин состоявшимся, тихо выходим.
+      const current = await session.findSession(dto.refreshToken)
+      if (!current) return
+
+      // Access-токен подтвердил личность (auth: true), но refresh должен принадлежать
+      // тому же юзеру — чужую сессию по чужому токену не гасим.
+      if (current.userId !== dto.userId)
+        throw new UnauthorizedError('Invalid refresh token', 'INVALID_TOKEN')
+
+      // Отзыв атомарно: удаляем сессию (DELETE, как revokeAll) + аудит logout.
+      await runTx(async () => {
+        await session.revokeById(current.id)
+        await audit.record({ userId: dto.userId, event: AUDIT_EVENT.LOGOUT })
+      })
+    },
   }
 }

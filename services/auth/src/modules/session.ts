@@ -27,6 +27,7 @@ export type ISessionRepo = {
   create: (input: CreateSessionInput) => Promise<{ id: string }>
   findByHash: (hash: string) => Promise<FindSession | undefined>
   markUsed: (id: string) => Promise<void>
+  revokeById: (id: string) => Promise<void>
   revokeAllByUserIdAndTokenVersion: (userId: string, tokenVersion: number) => Promise<void>
 }
 
@@ -69,6 +70,12 @@ export const sessionRepo = (db: Db): ISessionRepo => ({
     await sql`UPDATE sessions SET used = TRUE WHERE id = ${id}`
   },
 
+  // Отзыв одной сессии (logout): DELETE, как и revokeAll — записи не тянем в tombstone.
+  revokeById: async (id) => {
+    const sql = db()
+    await sql`DELETE FROM sessions WHERE id = ${id}`
+  },
+
   // Гасим всю «семью» сессий юзера с данной версией токена (reuse-детекция ротации).
   revokeAllByUserIdAndTokenVersion: async (userId, tokenVersion) => {
     const sql = db()
@@ -96,6 +103,7 @@ export type ISessionService = {
   issue: (input: IssueSessionInput) => Promise<IssuedSession>
   findSession: (refreshToken: string) => Promise<FindSession | undefined>
   markUsed: (sessionId: string) => Promise<void>
+  revokeById: (sessionId: string) => Promise<void>
   revokeAllByUserIdAndTokenVersion: (userId: string, tokenVersion: number) => Promise<void>
 }
 
@@ -126,6 +134,8 @@ export const sessionService = (
   },
 
   markUsed: (sessionId) => repo.markUsed(sessionId),
+
+  revokeById: (sessionId) => repo.revokeById(sessionId),
 
   revokeAllByUserIdAndTokenVersion: (userId, tokenVersion) =>
     repo.revokeAllByUserIdAndTokenVersion(userId, tokenVersion),

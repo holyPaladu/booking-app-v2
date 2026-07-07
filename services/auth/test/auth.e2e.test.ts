@@ -103,6 +103,7 @@ function buildApp() {
     },
     findSession: async () => undefined,
     markUsed: async () => {},
+    revokeById: async () => {},
     revokeAllByUserIdAndTokenVersion: async () => {},
   }
   const outbox: IOutboxService = { enqueue: async (job) => void enqueued.push(job) }

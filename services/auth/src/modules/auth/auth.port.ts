@@ -22,6 +22,9 @@ export const authModels = {
   'auth.refresh': t.Object({
     refresh_token: t.String(),
   }),
+  'auth.logout': t.Object({
+    refresh_token: t.String()
+  }),
 }
 
 export type AuthRegisterRequest = (typeof authModels)['auth.register']['static']
@@ -50,6 +53,7 @@ export type LoginResult =
 
 // Claims из проверенного challenge-токена для завершения логина (шаг-2).
 export type CompleteLoginInput = { userId: string; email: string; tokenVersion: number }
+export type RevokeTokenInput = { refreshToken: string, userId: string, email: string }
 
 // Публичная поверхность auth-модуля (другие модули зависят только от неё).
 export type IAuthService = {
@@ -65,6 +69,7 @@ export type IAuthService = {
   // Ротация refresh: отдаёт identity + новый refresh (access-JWT подписывает роут,
   // как в /login). ctx — для записи ip/user-agent в новую сессию.
   rotateToken: (refreshToken: string, ctx: LoginContext) => Promise<AuthenticatedResult>
+  revokeToken: (dto: RevokeTokenInput) => Promise<void>
 }
 
 // Вход создания токена верификации. token_hash — хэш OTP (сам OTP в БД не лежит).

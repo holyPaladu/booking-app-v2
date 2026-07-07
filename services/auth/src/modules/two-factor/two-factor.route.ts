@@ -11,7 +11,7 @@ type RouteDeps = {
 // (/auth/login/2fa) живёт в auth.route — там выпускается access-токен.
 export const twoFactorRouteV1 = (svc: ITwoFactorService, deps: RouteDeps) =>
   new Elysia({ prefix: 'auth/2fa', tags: ['auth'] })
-    .use(authMacro(deps.cfg.get('jwt_secret')))
+    .use(authMacro(deps.cfg.get('jwt_secret'), deps.cfg.get('jwt_expiry')))
     .model(twoFactorModels)
 
     .post(

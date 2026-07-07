@@ -12,22 +12,24 @@ import { UnauthorizedError } from './error/error.lib'
  *
  * Общий для всех сервисов (auth, booking). Дедупликация плагина — через `name`.
  */
-export const authMacro = (secret: string) =>
-  new Elysia({ name: 'auth.macro' }).use(jwt({ name: 'jwt', secret })).macro({
-    auth: {
-      async resolve({ jwt, headers: { authorization } }) {
-        if (!authorization?.startsWith('Bearer '))
-          throw new UnauthorizedError('Missing bearer token', 'UNAUTHORIZED')
+export const authMacro = (secret: string, exp: string) =>
+  new Elysia({ name: 'auth.macro' })
+    .use(jwt({ name: 'jwt', secret, exp }))
+    .macro({
+      auth: {
+        async resolve({ jwt, headers: { authorization } }) {
+          if (!authorization?.startsWith('Bearer '))
+            throw new UnauthorizedError('Missing bearer token', 'UNAUTHORIZED')
 
-        const payload = await jwt.verify(authorization.slice(7))
-        if (!payload) throw new UnauthorizedError('Invalid or expired token', 'UNAUTHORIZED')
+          const payload = await jwt.verify(authorization.slice(7))
+          if (!payload) throw new UnauthorizedError('Invalid or expired token', 'UNAUTHORIZED')
 
-        return {
-          currentUser: {
-            id: payload.sub as string,
-            email: payload.email as string,
-          },
-        }
+          return {
+            currentUser: {
+              id: payload.sub as string,
+              email: payload.email as string,
+            },
+          }
+        },
       },
-    },
-  })
+    })
