@@ -64,4 +64,13 @@ export const userRepo = (db: Db): IUserRepo => ({
     `
     return row
   },
+
+  updateEmailVerified: async (id) => {
+    const sql = db()
+    await sql`
+      UPDATE users
+      SET email_verified = TRUE
+      WHERE id = ${id}
+    `
+  }
 })

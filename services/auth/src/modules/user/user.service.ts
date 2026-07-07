@@ -10,6 +10,8 @@ export const userService = (repo: IUserRepo): IUserService => {
     getById: (id) => repo.findById(id),
     getCredentialsById: (id) => repo.findCredentialsById(id),
 
+    patchEmailVerified: (id) => repo.updateEmailVerified(id),
+
     findById: async (id) => {
       const user = await repo.findById(id)
       if (!user) throw new NotFoundError('User not found', 'USER_NOT_FOUND')

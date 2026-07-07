@@ -1,4 +1,4 @@
-import { ConflictError, NotFoundError, UnauthorizedError } from '@booking/shared'
+import { ConflictError, NotFoundError, UnauthorizedError, TooManyRequestsError } from '@booking/shared'
 import type { TxRunner } from '@lib/tx'
 import type { IAuditService } from '@modules/audit'
 import type { ILoginAttemptService } from '@modules/login-attempt'
@@ -10,7 +10,7 @@ import { AUDIT_EVENT, VERIFICATION_CHANNEL, VERIFICATION_TYPE } from './auth.con
 import type { IAuthRepo, IAuthService } from './auth.port'
 import type { IHashService, IOtpService } from './auth.security'
 
-const OTP_TTL_MS = 15 * 60 * 1000
+const OTP_TTL_MS = 15 * 60 * 1000 // 15min
 
 export type AuthServiceDeps = {
   users: IUserService
@@ -65,15 +65,14 @@ export const authService = (deps: AuthServiceDeps): IAuthService => {
           tokenHash,
           expiresAt,
         })
-
-        await audit.record({ userId: user.id, event: AUDIT_EVENT.ACCOUNT_CREATED })
-
         // Письмо — внешний side-effect: кладём задание в ТУ ЖЕ транзакцию,
         // отправит воркер уже после коммита (см. outbox.worker).
         await outbox.enqueue({
           topic: 'email.verification',
           payload: { email: dto.email, otp: code, expiresAt },
         })
+
+        await audit.record({ userId: user.id, event: AUDIT_EVENT.ACCOUNT_CREATED })
       })
     },
 
@@ -230,5 +229,32 @@ export const authService = (deps: AuthServiceDeps): IAuthService => {
         await audit.record({ userId: dto.userId, event: AUDIT_EVENT.LOGOUT })
       })
     },
+
+    /**
+     * Verify Email
+     */
+    verifyEmail: async (email, code) => {
+      const findToken = await repo.findAvailableVerificationToken(email, VERIFICATION_TYPE.EMAIL_CONFIRM)
+      if (!findToken) throw new NotFoundError("Verification token")
+
+      if (findToken.attempts >= findToken.maxAttempts)
+        throw new TooManyRequestsError("Verification attempt limit exceeded")
+
+      if (!otp.verify(code, findToken.tokenHash)) {
+        const { attempts } = await repo.changeAttemptVerificationToken(findToken.id)
+        if (attempts >= findToken.maxAttempts)
+          throw new TooManyRequestsError("Verification attempt limit exceeded")
+        else
+          throw new ConflictError("Invalid verification code")
+      }
+
+      await deps.runTx(async () => {
+        await repo.markVerificationTokenAsUsed(findToken.id)
+        await deps.users.patchEmailVerified(findToken.userId)
+      })
+    },
+    verifyEmailResend: async () => {
+      return
+    }
   }
 }

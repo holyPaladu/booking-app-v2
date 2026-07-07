@@ -23,6 +23,8 @@ export type IUserRepo = {
   findByPhone: (phone: string) => Promise<UserView | undefined>
   findById: (id: string) => Promise<UserView | undefined>
   findCredentialsById: (id: string) => Promise<UserCredentials | undefined>
+
+  updateEmailVerified: (id: string) => Promise<void>
 }
 
 // Публичная поверхность модуля — другие модули (например auth) зависят ТОЛЬКО от неё.
@@ -32,6 +34,8 @@ export type IUserService = {
   getByPhone: (phone: string) => Promise<UserView | undefined>
   getById: (id: string) => Promise<UserView | undefined>
   getCredentialsById: (id: string) => Promise<UserCredentials | undefined>
+
+  patchEmailVerified: (id: string) => Promise<void>
 
   findById: (id: string) => Promise<UserView>
 }

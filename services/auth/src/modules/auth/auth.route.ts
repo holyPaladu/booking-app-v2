@@ -31,7 +31,7 @@ export const authRouteV1 = (svc: IAuthService, deps: RouteDeps) =>
       '/register',
       async ({ body }) => {
         await svc.register(body)
-        return deps.response.success('Registered')
+        return deps.response.success('Registration successful! Please confirm your email.')
       },
       { body: 'auth.register' },
     )
@@ -136,4 +136,22 @@ export const authRouteV1 = (svc: IAuthService, deps: RouteDeps) =>
         return deps.response.success('Logged out')
       },
       { body: 'auth.logout', auth: true }
+    )
+
+    .post(
+      '/verify-email',
+      async ({ body }) => {
+        await svc.verifyEmail(body.email, body.code)
+        return deps.response.success(`Successfully email verified`, { email: body.email })
+      },
+      { body: 'auth.verify-email' }
+    )
+
+    .post(
+      '/verify-email/resend',
+      async ({ body }) => {
+        await svc.verifyEmailResend(body.email)
+        return deps.response.success(`Successfully resend code for this ${body.email}.`)
+      },
+      { body: 'auth.verify-email.resend' }
     )

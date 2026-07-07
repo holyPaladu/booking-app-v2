@@ -1,4 +1,5 @@
 import { t } from 'elysia'
+import { VERIFICATION_TYPE } from '@modules/auth/auth.const'
 
 // Контракт входа HTTP-слоя: Elysia-модели валидации + выводимые из них типы запросов
 // (single source of truth — типы не дублируем интерфейсами). Живут рядом с портом.
@@ -25,6 +26,13 @@ export const authModels = {
   'auth.logout': t.Object({
     refresh_token: t.String()
   }),
+  'auth.verify-email': t.Object({
+    email: t.String({ format: 'email' }),
+    code: t.String({ maxLength: 6, minLength: 6 })
+  }),
+  'auth.verify-email.resend': t.Object({
+    email: t.String({ format: 'email' })
+  })
 }
 
 export type AuthRegisterRequest = (typeof authModels)['auth.register']['static']
@@ -70,6 +78,10 @@ export type IAuthService = {
   // как в /login). ctx — для записи ip/user-agent в новую сессию.
   rotateToken: (refreshToken: string, ctx: LoginContext) => Promise<AuthenticatedResult>
   revokeToken: (dto: RevokeTokenInput) => Promise<void>
+
+  // verify email
+  verifyEmail: (email: string, code: string) => Promise<void>
+  verifyEmailResend: (email: string) => Promise<void>
 }
 
 // Вход создания токена верификации. token_hash — хэш OTP (сам OTP в БД не лежит).
@@ -81,11 +93,26 @@ export type CreateVerificationInput = {
   tokenHash: string
   expiresAt: string // ISO timestamp
 }
+export type VerificationToken = {
+  id: string
+  userId: string
+  tokenHash: string
+  attempts: number
+  maxAttempts: number
+  used: boolean
+  usedAt: string
+  expiresAt: string
+}
+type VerificationType = (typeof VERIFICATION_TYPE)[keyof typeof VERIFICATION_TYPE]
 
 // Контракт SQL-слоя auth-флоу: побочные записи регистрации с одним писателем
 // (роль, токен верификации). Пользователи — через IUserService, аудит — через
 // IAuditService, письмо — через IOutboxService (каждая таблица — свой владелец).
 export type IAuthRepo = {
   grantDefaultRole: (userId: string) => Promise<void>
+
   createVerificationToken: (input: CreateVerificationInput) => Promise<void>
+  findAvailableVerificationToken: (email: string, verificationType: VerificationType) => Promise<VerificationToken>
+  changeAttemptVerificationToken: (id: string) => Promise<{ attempts: number }>
+  markVerificationTokenAsUsed: (id: string) => Promise<void>
 }
