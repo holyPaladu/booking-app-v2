@@ -96,7 +96,7 @@ export const authService = (deps: AuthServiceDeps): IAuthService => {
 
       // 3. Статус.
       if (user.status === 'deleted') {
-        throw new NotFoundError('Not found user', 'NOT_FOUND')
+        throw new NotFoundError('User', 'NOT_FOUND')
       }
       if (user.status === 'banned') {
         const reason = user.bannedReason && user.bannedAt ? user.bannedReason : 'User banned'
@@ -361,5 +361,40 @@ export const authService = (deps: AuthServiceDeps): IAuthService => {
         await audit.record({ userId: existToken.userId, event: AUDIT_EVENT.PASSWORD_RESET_COMPLETED })
       })
     },
+    passwordChange: async (dto, ctx) => {
+      const existUser = await users.getCredentialsById(dto.userId)
+      if (!existUser) throw new NotFoundError('User')
+
+      const isMatch = await hash.verify(dto.currentPassword, existUser.passwordHash)
+      if (!isMatch) throw new ConflictError('Invalid credentials', 'INVALID_CREDENTIALS')
+
+      const hashPassword = await hash.hash(dto.newPassword)
+
+      return await runTx(async () => {
+        // token_version + 1 → refresh старой версии больше не продлевается (ленивый отзыв).
+        const { tokenVersion } = await users.patchPassword(existUser.id, hashPassword)
+
+        // Жадно выкидываем остальные устройства сразу: удаляем все сессии СТАРОЙ версии
+        // (existUser.tokenVersion прочитан до patch). Делаем это ДО issue — новая сессия
+        // уже под новой версией, под удаление не попадает.
+        await session.revokeAllByUserIdAndTokenVersion(existUser.id, existUser.tokenVersion)
+
+        // Держим текущее устройство залогиненным: новая сессия уже под НОВОЙ версией.
+        const issued = await session.issue({
+          userId: existUser.id,
+          tokenVersion,
+          ip: ctx.ip,
+          userAgent: ctx.userAgent,
+        })
+
+        await audit.record({ userId: existUser.id, event: AUDIT_EVENT.PASSWORD_CHANGED })
+
+        return {
+          identity: { id: existUser.id, email: dto.email },
+          refreshToken: issued.refreshToken,
+          refreshExpiresAt: issued.expiresAt,
+        }
+      })
+    }
   }
 }

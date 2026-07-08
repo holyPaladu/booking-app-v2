@@ -42,6 +42,10 @@ export const authModels = {
     email: t.String({ format: 'email' }),
     code: t.String({ minLength: 6 }),
     new_password: t.String({ minLength: 6 })
+  }),
+  'auth.password.change': t.Object({
+    current_password: t.String({ minLength: 6 }),
+    new_password: t.String({ minLength: 6 })
   })
 }
 
@@ -72,6 +76,12 @@ export type LoginResult =
 // Claims из проверенного challenge-токена для завершения логина (шаг-2).
 export type CompleteLoginInput = { userId: string; email: string; tokenVersion: number }
 export type RevokeTokenInput = { refreshToken: string; userId: string; email: string }
+export type PasswordChange = {
+  currentPassword: string
+  newPassword: string
+  userId: string
+  email: string
+}
 
 // Публичная поверхность auth-модуля (другие модули зависят только от неё).
 export type IAuthService = {
@@ -96,6 +106,7 @@ export type IAuthService = {
   // Password
   passwordForgot: (email: string) => Promise<void>
   passwordReset: (email: string, code: string, newPassword: string) => Promise<void>
+  passwordChange: (input: PasswordChange, ctx: LoginContext) => Promise<AuthenticatedResult>
 }
 
 // Вход создания токена верификации. token_hash — хэш OTP (сам OTP в БД не лежит).

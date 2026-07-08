@@ -165,12 +165,40 @@ export const authRouteV1 = (svc: IAuthService, deps: RouteDeps) =>
         },
         { body: 'auth.password.forgot' }
       )
-      .post(
+      .patch(
         '/reset',
         async ({ body }) => {
           await svc.passwordReset(body.email, body.code, body.new_password)
           return deps.response.success("Password changed.")
         },
         { body: 'auth.password.reset' }
+      )
+      .patch(
+        '/change',
+        async ({ body, currentUser, jwt, server, request }) => {
+          const ip = server?.requestIP(request)?.address ?? null
+          const userAgent = request.headers.get('user-agent') ?? null
+
+          const result = await svc.passwordChange(
+            {
+              newPassword: body.new_password,
+              currentPassword: body.current_password,
+              userId: currentUser.id,
+              email: currentUser.email,
+            },
+            { ip, userAgent },
+          )
+
+          const access_token = await jwt.sign({
+            sub: result.identity.id,
+            email: result.identity.email,
+          })
+          return deps.response.success('Password changed', {
+            access_token,
+            refresh_token: result.refreshToken,
+            token_type: 'Bearer',
+          })
+        },
+        { auth: true, body: 'auth.password.change' },
       )
     )
