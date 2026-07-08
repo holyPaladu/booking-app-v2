@@ -294,5 +294,72 @@ export const authService = (deps: AuthServiceDeps): IAuthService => {
         })
       })
     },
+
+    /**
+     * Password
+     */
+    passwordForgot: async (email) => {
+      const existUser = await users.getByEmail(email)
+      if (!existUser) return
+
+      const code = otp.generate()
+      const tokenHash = otp.hash(code)
+      const expiresAt = new Date(Date.now() + OTP_TTL_MS).toISOString()
+
+      await runTx(async () => {
+        // Гасим прежний активный токен: idx_vt_one_active_per_type допускает лишь один
+        // used=FALSE на (user, type) — без этого повторный /forgot упал бы на конфликте.
+        await repo.invalidateActiveVerificationTokens(existUser.id, VERIFICATION_TYPE.PASSWORD_RESET)
+        await repo.createVerificationToken({
+          userId: existUser.id,
+          type: VERIFICATION_TYPE.PASSWORD_RESET,
+          channel: VERIFICATION_CHANNEL.EMAIL,
+          identifier: email,
+          tokenHash,
+          expiresAt,
+        })
+        // Письмо — внешний side-effect: кладём задание в ТУ ЖЕ транзакцию,
+        // отправит воркер уже после коммита (см. outbox.worker).
+        await outbox.enqueue({
+          topic: 'password.reset',
+          payload: { email: email, otp: code, expiresAt },
+        })
+
+        await audit.record({ userId: existUser.id, event: AUDIT_EVENT.PASSWORD_RESET_REQUESTED })
+      })
+    },
+    passwordReset: async (email, code, newPassword) => {
+      const existUser = await users.getByEmail(email)
+      if (!existUser) throw new NotFoundError("User")
+
+      const existToken = await repo.findAvailableVerificationToken(email, VERIFICATION_TYPE.PASSWORD_RESET)
+      if (!existToken) throw new NotFoundError("Verification token")
+
+      if (existToken.attempts >= existToken.maxAttempts)
+        throw new TooManyRequestsError('Verification attempt limit exceeded')
+
+      if (!otp.verify(code, existToken.tokenHash)) {
+        const { attempts } = await repo.changeAttemptVerificationToken(existToken.id)
+        if (attempts >= existToken.maxAttempts)
+          throw new TooManyRequestsError('Verification attempt limit exceeded')
+        else
+          throw new ConflictError('Invalid verification code')
+      }
+
+      const passwordHash = await hash.hash(newPassword)
+
+      await runTx(async () => {
+        await repo.markVerificationTokenAsUsed(existToken.id)
+        // Единственный рычаг обесценивания старого доступа тут — token_version:
+        // patchPassword одним UPDATE делает token_version + 1. Механизм ленивый и
+        // косвенный — строки в sessions НЕ удаляются. Отзыв срабатывает при
+        // следующей ротации: rotateToken читает свежий users.token_version и
+        // сверяет с session.tokenVersion → несовпадение → SESSION_REVOKED, refresh
+        // больше не продлевается. Живой access-JWT это НЕ гасит (он не несёт tv,
+        // authMacro его не сверяет — окно до истечения TTL; см. P2.9 в auth-roadmap).
+        await users.patchPassword(existUser.id, passwordHash)
+        await audit.record({ userId: existToken.userId, event: AUDIT_EVENT.PASSWORD_RESET_COMPLETED })
+      })
+    },
   }
 }

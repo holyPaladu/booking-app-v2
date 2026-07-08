@@ -72,5 +72,15 @@ export const userRepo = (db: Db): IUserRepo => ({
       SET email_verified = TRUE
       WHERE id = ${id}
     `
+  },
+  updatePassword: async (id, newPassword) => {
+    const sql = db()
+    const [row] = await sql<{ tokenVersion: number }[]>`
+      UPDATE users
+      SET password_hash = ${newPassword}, token_version = token_version + 1
+      WHERE id = ${id}
+      RETURNING token_version AS "tokenVersion"
+    `
+    return row
   }
 })

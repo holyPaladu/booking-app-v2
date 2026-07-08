@@ -31,7 +31,17 @@ export const authModels = {
     code: t.String({ maxLength: 6, minLength: 6 }),
   }),
   'auth.verify-email.resend': t.Object({
+    email: t.String({ format: 'email' }),
+  }),
+
+  // Password Models
+  'auth.password.forgot': t.Object({
     email: t.String({ format: 'email' })
+  }),
+  'auth.password.reset': t.Object({
+    email: t.String({ format: 'email' }),
+    code: t.String({ minLength: 6 }),
+    new_password: t.String({ minLength: 6 })
   })
 }
 
@@ -82,6 +92,10 @@ export type IAuthService = {
   // verify email
   verifyEmail: (email: string, code: string) => Promise<void>
   verifyEmailResend: (email: string) => Promise<void>
+
+  // Password
+  passwordForgot: (email: string) => Promise<void>
+  passwordReset: (email: string, code: string, newPassword: string) => Promise<void>
 }
 
 // Вход создания токена верификации. token_hash — хэш OTP (сам OTP в БД не лежит).

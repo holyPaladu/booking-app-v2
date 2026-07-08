@@ -25,6 +25,7 @@ export type IUserRepo = {
   findCredentialsById: (id: string) => Promise<UserCredentials | undefined>
 
   updateEmailVerified: (id: string) => Promise<void>
+  updatePassword: (id: string, newPassword: string) => Promise<{ tokenVersion: number }>
 }
 
 // Публичная поверхность модуля — другие модули (например auth) зависят ТОЛЬКО от неё.
@@ -36,6 +37,7 @@ export type IUserService = {
   getCredentialsById: (id: string) => Promise<UserCredentials | undefined>
 
   patchEmailVerified: (id: string) => Promise<void>
+  patchPassword: (id: string, newPassword: string) => Promise<{ tokenVersion: number }>
 
   findById: (id: string) => Promise<UserView>
 }

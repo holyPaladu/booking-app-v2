@@ -81,6 +81,14 @@ function buildApp() {
       const u = rows.find((r) => r.id === id)
       if (u) u.emailVerified = true
     },
+    patchPassword: async (id, newPassword) => {
+      const u = rows.find((r) => r.id === id)
+      if (u) {
+        u.passwordHash = newPassword
+        u.tokenVersion += 1
+      }
+      return { tokenVersion: u?.tokenVersion ?? 0 }
+    },
   }
 
   // Побочные записи auth с одним писателем — порт IAuthRepo.

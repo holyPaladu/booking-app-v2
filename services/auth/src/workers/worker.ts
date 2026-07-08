@@ -18,6 +18,12 @@ export function startWorkers(container: Container, cfg: Cfg) {
             otp: p.otp as string,
             expiresAt: p.expiresAt as string,
           }),
+        'password.reset': (p) =>
+          container.notifier.sendPasswordReset({
+            email: p.email as string,
+            otp: p.otp as string,
+            expiresAt: p.expiresAt as string,
+          }),
       },
     },
     { intervalMs: cfg.getNumber('outbox_poll_ms') },

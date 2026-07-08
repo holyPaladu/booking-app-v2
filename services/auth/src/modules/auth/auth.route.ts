@@ -155,3 +155,22 @@ export const authRouteV1 = (svc: IAuthService, deps: RouteDeps) =>
       },
       { body: 'auth.verify-email.resend' }
     )
+
+    .group('/password', pass => pass
+      .post(
+        '/forgot',
+        async ({ body }) => {
+          await svc.passwordForgot(body.email)
+          return deps.response.success("Password forgot started, wait code in your email")
+        },
+        { body: 'auth.password.forgot' }
+      )
+      .post(
+        '/reset',
+        async ({ body }) => {
+          await svc.passwordReset(body.email, body.code, body.new_password)
+          return deps.response.success("Password changed.")
+        },
+        { body: 'auth.password.reset' }
+      )
+    )

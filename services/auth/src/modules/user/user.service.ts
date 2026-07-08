@@ -11,6 +11,7 @@ export const userService = (repo: IUserRepo): IUserService => {
     getCredentialsById: (id) => repo.findCredentialsById(id),
 
     patchEmailVerified: (id) => repo.updateEmailVerified(id),
+    patchPassword: (id, newPassword) => repo.updatePassword(id, newPassword),
 
     findById: async (id) => {
       const user = await repo.findById(id)
