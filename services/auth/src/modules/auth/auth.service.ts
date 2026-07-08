@@ -1,4 +1,9 @@
-import { ConflictError, NotFoundError, UnauthorizedError, TooManyRequestsError } from '@booking/shared'
+import {
+  ConflictError,
+  NotFoundError,
+  TooManyRequestsError,
+  UnauthorizedError,
+} from '@booking/shared'
 import type { TxRunner } from '@lib/tx'
 import type { IAuditService } from '@modules/audit'
 import type { ILoginAttemptService } from '@modules/login-attempt'
@@ -234,27 +239,60 @@ export const authService = (deps: AuthServiceDeps): IAuthService => {
      * Verify Email
      */
     verifyEmail: async (email, code) => {
-      const findToken = await repo.findAvailableVerificationToken(email, VERIFICATION_TYPE.EMAIL_CONFIRM)
-      if (!findToken) throw new NotFoundError("Verification token")
+      const findToken = await repo.findAvailableVerificationToken(
+        email,
+        VERIFICATION_TYPE.EMAIL_CONFIRM,
+      )
+      if (!findToken) throw new NotFoundError('Verification token')
 
       if (findToken.attempts >= findToken.maxAttempts)
-        throw new TooManyRequestsError("Verification attempt limit exceeded")
+        throw new TooManyRequestsError('Verification attempt limit exceeded')
 
       if (!otp.verify(code, findToken.tokenHash)) {
         const { attempts } = await repo.changeAttemptVerificationToken(findToken.id)
         if (attempts >= findToken.maxAttempts)
-          throw new TooManyRequestsError("Verification attempt limit exceeded")
+          throw new TooManyRequestsError('Verification attempt limit exceeded')
         else
-          throw new ConflictError("Invalid verification code")
+          throw new ConflictError('Invalid verification code')
       }
 
-      await deps.runTx(async () => {
+      // Успех атомарно: гасим токен, помечаем email подтверждённым, пишем аудит.
+      await runTx(async () => {
         await repo.markVerificationTokenAsUsed(findToken.id)
-        await deps.users.patchEmailVerified(findToken.userId)
+        await users.patchEmailVerified(findToken.userId)
+        await audit.record({ userId: findToken.userId, event: AUDIT_EVENT.EMAIL_VERIFIED })
       })
     },
-    verifyEmailResend: async () => {
-      return
-    }
+
+    // Повторная выдача кода подтверждения. Прежний активный токен гасим — партиал-уникум
+    // idx_vt_one_active_per_type допускает лишь один used=FALSE на (user, type), поэтому без
+    // инвалидации INSERT нового кода упал бы на конфликте (в т.ч. по протухшему токену).
+    verifyEmailResend: async (email) => {
+      const user = await users.getByEmail(email)
+      if (!user) throw new NotFoundError('User')
+      if (user.emailVerified) throw new ConflictError('Email already verified', 'ALREADY_VERIFIED')
+
+      // Новый OTP: наружу уйдёт код, в БД — только его хэш (как при регистрации).
+      const code = otp.generate()
+      const tokenHash = otp.hash(code)
+      const expiresAt = new Date(Date.now() + OTP_TTL_MS).toISOString()
+
+      // Атомарно: инвалидация старого токена + новый токен + письмо в outbox.
+      await runTx(async () => {
+        await repo.invalidateActiveVerificationTokens(user.id, VERIFICATION_TYPE.EMAIL_CONFIRM)
+        await repo.createVerificationToken({
+          userId: user.id,
+          type: VERIFICATION_TYPE.EMAIL_CONFIRM,
+          channel: VERIFICATION_CHANNEL.EMAIL,
+          identifier: email,
+          tokenHash,
+          expiresAt,
+        })
+        await outbox.enqueue({
+          topic: 'email.verification',
+          payload: { email, otp: code, expiresAt },
+        })
+      })
+    },
   }
 }

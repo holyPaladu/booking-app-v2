@@ -70,5 +70,16 @@ export const authRepo = (db: Db): IAuthRepo => ({
       SET used = TRUE, used_at = NOW()
       WHERE id = ${id}
     `
-  }
+  },
+
+  invalidateActiveVerificationTokens: async (userId, verificationType) => {
+    const sql = db()
+    await sql`
+      UPDATE verification_tokens
+      SET used = TRUE, used_at = NOW()
+      WHERE user_id = ${userId}
+        AND type = ${verificationType}
+        AND used = FALSE
+    `
+  },
 })

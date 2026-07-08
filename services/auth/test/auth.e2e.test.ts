@@ -29,7 +29,17 @@ function buildApp() {
     tokenVersion: number
   }[] = []
   const granted: string[] = []
-  const verifications: { userId: string; tokenHash: string }[] = []
+  const verifications: {
+    id: string
+    userId: string
+    type: string
+    identifier: string
+    tokenHash: string
+    attempts: number
+    maxAttempts: number
+    used: boolean
+    expiresAt: string
+  }[] = []
   const enqueued: OutboxJob[] = []
   const audited: string[] = []
   const sessionsCreated: { userId: string; refreshToken: string }[] = []
@@ -67,13 +77,64 @@ function buildApp() {
       if (!u) throw new Error('not found')
       return { id: u.id, email: u.email, status: u.status }
     },
+    patchEmailVerified: async (id) => {
+      const u = rows.find((r) => r.id === id)
+      if (u) u.emailVerified = true
+    },
   }
 
   // Побочные записи auth с одним писателем — порт IAuthRepo.
   const repo: IAuthRepo = {
     grantDefaultRole: async (userId) => void granted.push(userId),
     createVerificationToken: async (input) =>
-      void verifications.push({ userId: input.userId, tokenHash: input.tokenHash }),
+      void verifications.push({
+        id: crypto.randomUUID(),
+        userId: input.userId,
+        type: input.type,
+        identifier: input.identifier,
+        tokenHash: input.tokenHash,
+        attempts: 0,
+        maxAttempts: 5,
+        used: false,
+        expiresAt: input.expiresAt,
+      }),
+    // Единственный активный (used=FALSE, не протухший) токен по identifier+type —
+    // зеркало idx_vt_one_active_per_type.
+    findAvailableVerificationToken: async (email, verificationType) => {
+      const v = verifications.find(
+        (t) =>
+          t.identifier === email &&
+          t.type === verificationType &&
+          !t.used &&
+          new Date(t.expiresAt).getTime() > Date.now(),
+      )
+      return (
+        v && {
+          id: v.id,
+          userId: v.userId,
+          tokenHash: v.tokenHash,
+          attempts: v.attempts,
+          maxAttempts: v.maxAttempts,
+          used: v.used,
+          usedAt: '',
+          expiresAt: v.expiresAt,
+        }
+      )
+    },
+    changeAttemptVerificationToken: async (id) => {
+      const v = verifications.find((t) => t.id === id)
+      if (v) v.attempts += 1
+      return { attempts: v?.attempts ?? 0 }
+    },
+    markVerificationTokenAsUsed: async (id) => {
+      const v = verifications.find((t) => t.id === id)
+      if (v) v.used = true
+    },
+    invalidateActiveVerificationTokens: async (userId, verificationType) => {
+      for (const t of verifications) {
+        if (t.userId === userId && t.type === verificationType && !t.used) t.used = true
+      }
+    },
   }
   // 2FA-модуль через service-порт: гейт по twoFaUsers, фиктивный код '654321'.
   const twoFactor: ITwoFactorService = {

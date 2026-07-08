@@ -1,5 +1,5 @@
+import type { VERIFICATION_TYPE } from '@modules/auth/auth.const'
 import { t } from 'elysia'
-import { VERIFICATION_TYPE } from '@modules/auth/auth.const'
 
 // Контракт входа HTTP-слоя: Elysia-модели валидации + выводимые из них типы запросов
 // (single source of truth — типы не дублируем интерфейсами). Живут рядом с портом.
@@ -24,11 +24,11 @@ export const authModels = {
     refresh_token: t.String(),
   }),
   'auth.logout': t.Object({
-    refresh_token: t.String()
+    refresh_token: t.String(),
   }),
   'auth.verify-email': t.Object({
     email: t.String({ format: 'email' }),
-    code: t.String({ maxLength: 6, minLength: 6 })
+    code: t.String({ maxLength: 6, minLength: 6 }),
   }),
   'auth.verify-email.resend': t.Object({
     email: t.String({ format: 'email' })
@@ -61,7 +61,7 @@ export type LoginResult =
 
 // Claims из проверенного challenge-токена для завершения логина (шаг-2).
 export type CompleteLoginInput = { userId: string; email: string; tokenVersion: number }
-export type RevokeTokenInput = { refreshToken: string, userId: string, email: string }
+export type RevokeTokenInput = { refreshToken: string; userId: string; email: string }
 
 // Публичная поверхность auth-модуля (другие модули зависят только от неё).
 export type IAuthService = {
@@ -112,7 +112,16 @@ export type IAuthRepo = {
   grantDefaultRole: (userId: string) => Promise<void>
 
   createVerificationToken: (input: CreateVerificationInput) => Promise<void>
-  findAvailableVerificationToken: (email: string, verificationType: VerificationType) => Promise<VerificationToken>
+  findAvailableVerificationToken: (
+    email: string,
+    verificationType: VerificationType,
+  ) => Promise<VerificationToken | undefined>
   changeAttemptVerificationToken: (id: string) => Promise<{ attempts: number }>
   markVerificationTokenAsUsed: (id: string) => Promise<void>
+  // Гасит все активные (used=FALSE) токены юзера этого типа — нужно перед выдачей
+  // нового кода: idx_vt_one_active_per_type допускает лишь один активный на (user, type).
+  invalidateActiveVerificationTokens: (
+    userId: string,
+    verificationType: VerificationType,
+  ) => Promise<void>
 }
